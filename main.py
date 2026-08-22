@@ -193,7 +193,7 @@ def generera_briefing(rådata):
     """
 
     response = client.models.generate_content(
-        model='gemini-2.5-flash',
+        gemini-2.5-flash
         contents=prompt,
     )
     return response.text
@@ -243,7 +243,7 @@ if 'briefing' in st.session_state:
                 Svara pedagogiskt, lugnt och tydligt på svenska. Om användaren ber om att få fördjupa en nyhet eller få en specifik nyhet/uppdatering, använd rådatan eller din kunskap för att ge ett fylligt och intressant svar.
                 """
                 svar = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    gemini-2.5-flash
                     contents=prompt_fråga
                 )
                 st.info(svar.text)
