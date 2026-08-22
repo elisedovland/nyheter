@@ -84,12 +84,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Konfigurera Gemini med det klassiska biblioteket
+# Konfigurera Gemini med gemini-flash-latest som fungerar med nya nycklar
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 if api_key:
     genai.configure(api_key=api_key)
-    # Vi använder gemini-1.5-flash som är standard och stabilt i detta bibliotek
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-flash-latest')
 else:
     model = None
 
