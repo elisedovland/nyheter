@@ -2,25 +2,22 @@ import os
 import random
 import streamlit as st
 import feedparser
-from google import genai
+import google.generativeai as genai
 
 # --- 1. SIDA OCH TILLGÄNGLIGHETSINSTÄLLNINGAR ---
 st.set_page_config(
     page_title="Morgonposten – AI Briefing",
     page_icon="☕",
-    layout="centered"  # Smal läskolumn för nystagmus
+    layout="centered"
 )
 
-# CSS för optimal ergonomi vid nystagmus och migrän (Varm gulaktig ton & mörk text)
+# CSS för optimal ergonomi vid nystagmus och migrän
 st.markdown("""
     <style>
-    /* Varm, mjuk gulaktig bakgrund för skonsam läsning */
     .stApp {
         background-color: #F7F4EA !important;
         color: #2C2A29 !important;
     }
-
-    /* Tidningshuvud */
     .header-box {
         text-align: center;
         border-bottom: 2px solid #D6D0C2;
@@ -40,8 +37,6 @@ st.markdown("""
         color: #5C564F !important;
         margin-top: 10px !important;
     }
-
-    /* Brödtext: Optimerad för nystagmus */
     p, li, label, div {
         font-family: "Atkinson Hyperlegible", Verdana, -apple-system, sans-serif !important;
         font-size: 20px !important;
@@ -51,29 +46,22 @@ st.markdown("""
         word-spacing: 1px !important;
         text-align: left !important;
     }
-
-    /* Rubriker */
     h1, h2, h3, h4 {
         color: #1A1918 !important;
         font-weight: 600 !important;
         margin-top: 1.4em !important;
         margin-bottom: 0.1em !important;
     }
-
     small {
         font-size: 15px !important;
         color: #5C564F !important;
         display: block;
         margin-bottom: 14px !important;
     }
-
-    /* Dämpade bilder */
     img {
         border-radius: 6px;
         filter: brightness(0.95) contrast(0.95);
     }
-
-    /* Varma, dämpade knappar och fält */
     .stButton>button {
         background-color: #E6E0D0 !important;
         color: #2C2A29 !important;
@@ -87,7 +75,6 @@ st.markdown("""
         background-color: #D9D2BF !important;
         border-color: #A89F8B !important;
     }
-
     input, textarea {
         background-color: #FFFFFF !important;
         color: #2C2A29 !important;
@@ -97,12 +84,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# Starta Gemini Client säkert via Streamlit Secrets
+# Konfigurera Gemini med det klassiska biblioteket
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 if api_key:
-    client = genai.Client(api_key=api_key)
+    genai.configure(api_key=api_key)
+    # Vi använder gemini-1.5-flash som är standard och stabilt i detta bibliotek
+    model = genai.GenerativeModel('gemini-1.5-flash')
 else:
-    client = None
+    model = None
 
 def hamta_kallmaterial():
     kallor = {
@@ -138,7 +127,7 @@ def hamta_kallmaterial():
     return samlad_data
 
 def generera_briefing(rådata):
-    if not client:
+    if not model:
         return "⚠️ API-nyckel saknas. Lägg till din GEMINI_API_KEY under 'Secrets' i Streamlit Cloud."
 
     prompt = f"""
@@ -192,7 +181,7 @@ def generera_briefing(rådata):
     - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
     """
 
-    response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+    response = model.generate_content(prompt)
     return response.text
 
 # --- 2. HUVUDGRÄNSSNITT ---
@@ -222,7 +211,7 @@ if 'briefing' in st.session_state:
     användar_fråga = st.text_input("Vad funderar du på? (t.ex. 'Förklara ordet ratificera', 'Expandera nyhet 3' eller 'Berätta mer om valet i USA'):")
     
     if användar_fråga:
-        if not client:
+        if not model:
             st.error("⚠️ API-nyckel saknas för att använda chatten.")
         else:
             with st.spinner("AI-assistenten funderar..."):
@@ -239,7 +228,7 @@ if 'briefing' in st.session_state:
 
                 Svara pedagogiskt, lugnt och tydligt på svenska. Om användaren ber om att få fördjupa en nyhet eller få en specifik nyhet/uppdatering, använd rådatan eller din kunskap för att ge ett fylligt och intressant svar.
                 """
-                svar = client.models.generate_content(model='gemini-2.5-flash', contents=prompt_fråga)
+                svar = model.generate_content(prompt_fråga)
                 st.info(svar.text)
 else:
     st.write("Klicka på knappen ovan för att starta dagens läsning.")
