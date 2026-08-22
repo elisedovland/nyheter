@@ -26,7 +26,7 @@ st.markdown("""
     }
     .header-title {
         font-family: Georgia, serif !important;
-        font-size: 38px !important;
+        font-size: 28px !important;
         color: #1A1918 !important;
         margin: 0 !important;
         letter-spacing: 1.5px !important;
