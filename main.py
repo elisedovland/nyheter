@@ -192,10 +192,7 @@ def generera_briefing(rådata):
     - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
     """
 
-    response = client.models.generate_content(
-        model='gemini-2.5-flash'
-        contents=prompt,
-    )
+    response = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
     return response.text
 
 # --- 2. HUVUDGRÄNSSNITT ---
@@ -242,10 +239,7 @@ if 'briefing' in st.session_state:
 
                 Svara pedagogiskt, lugnt och tydligt på svenska. Om användaren ber om att få fördjupa en nyhet eller få en specifik nyhet/uppdatering, använd rådatan eller din kunskap för att ge ett fylligt och intressant svar.
                 """
-                svar = client.models.generate_content(
-                    model='gemini-2.5-flash'
-                    contents=prompt_fråga
-                )
+                svar = client.models.generate_content(model='gemini-2.5-flash', contents=prompt_fråga)
                 st.info(svar.text)
 else:
     st.write("Klicka på knappen ovan för att starta dagens läsning.")
