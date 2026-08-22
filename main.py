@@ -1,8 +1,9 @@
+Python
 import os
 import random
 import streamlit as st
 import feedparser
-# from google import genai
+from google import genai
 
 # --- 1. SIDA OCH TILLGÄNGLIGHETSINSTÄLLNINGAR ---
 st.set_page_config(
@@ -11,33 +12,34 @@ st.set_page_config(
     layout="centered"  # Smal läskolumn för nystagmus
 )
 
-# CSS för optimal ergonomi vid nystagmus och migrän
+# CSS för optimal ergonomi vid nystagmus och migrän (Varm gulaktig ton & mörk text)
 st.markdown("""
     <style>
-    /* Varm, dämpad bakgrund utan blått ljus */
+    /* Varm, mjuk gulaktig bakgrund för skonsam läsning */
     .stApp {
-        background-color: #181816 !important;
-        color: #E6E2DD !important;
+        background-color: #F7F4EA !important;
+        color: #2C2A29 !important;
     }
 
     /* Tidningshuvud */
     .header-box {
         text-align: center;
-        border-bottom: 1px solid #33322E;
-        padding-bottom: 20px;
-        margin-bottom: 30px;
+        border-bottom: 2px solid #D6D0C2;
+        padding-bottom: 25px;
+        margin-bottom: 35px;
     }
     .header-title {
         font-family: Georgia, serif !important;
-        font-size: 30px !important;
-        color: #F0EAE1 !important;
+        font-size: 38px !important;
+        color: #1A1918 !important;
         margin: 0 !important;
-        letter-spacing: 1px !important;
+        letter-spacing: 1.5px !important;
+        font-weight: 700 !important;
     }
     .header-subtitle {
-        font-size: 16px !important;
-        color: #A8A29E !important;
-        margin-top: 8px !important;
+        font-size: 18px !important;
+        color: #5C564F !important;
+        margin-top: 10px !important;
     }
 
     /* Brödtext: Optimerad för nystagmus */
@@ -45,7 +47,7 @@ st.markdown("""
         font-family: "Atkinson Hyperlegible", Verdana, -apple-system, sans-serif !important;
         font-size: 20px !important;
         line-height: 1.85 !important;
-        color: #E6E2DD !important;
+        color: #2C2A29 !important;
         letter-spacing: 0.4px !important;
         word-spacing: 1px !important;
         text-align: left !important;
@@ -53,7 +55,7 @@ st.markdown("""
 
     /* Rubriker */
     h1, h2, h3, h4 {
-        color: #F0EAE1 !important;
+        color: #1A1918 !important;
         font-weight: 600 !important;
         margin-top: 1.4em !important;
         margin-bottom: 0.1em !important;
@@ -61,7 +63,7 @@ st.markdown("""
 
     small {
         font-size: 15px !important;
-        color: #A8A29E !important;
+        color: #5C564F !important;
         display: block;
         margin-bottom: 14px !important;
     }
@@ -69,34 +71,39 @@ st.markdown("""
     /* Dämpade bilder */
     img {
         border-radius: 6px;
-        filter: brightness(0.85) contrast(0.95);
+        filter: brightness(0.95) contrast(0.95);
     }
 
     /* Varma, dämpade knappar och fält */
     .stButton>button {
-        background-color: #272623 !important;
-        color: #E6E2DD !important;
-        border: 1px solid #44423D !important;
+        background-color: #E6E0D0 !important;
+        color: #2C2A29 !important;
+        border: 1px solid #C4BCA8 !important;
         font-size: 18px !important;
         padding: 12px 26px !important;
         border-radius: 6px !important;
+        font-weight: 600 !important;
     }
     .stButton>button:hover {
-        background-color: #33322E !important;
-        border-color: #55534C !important;
+        background-color: #D9D2BF !important;
+        border-color: #A89F8B !important;
     }
 
-    input {
-        background-color: #272623 !important;
-        color: #E6E2DD !important;
+    input, textarea {
+        background-color: #FFFFFF !important;
+        color: #2C2A29 !important;
         font-size: 18px !important;
-        border: 1px solid #44423D !important;
+        border: 1px solid #C4BCA8 !important;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# Starta Gemini Client
-client = None
+# Starta Gemini Client säkert via Streamlit Secrets
+api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+if api_key:
+    client = genai.Client(api_key=api_key)
+else:
+    client = None
 
 def hamta_kallmaterial():
     kallor = {
@@ -111,24 +118,30 @@ def hamta_kallmaterial():
 
     samlad_data = ""
     for namn, url in kallor.items():
-        feed = feedparser.parse(url)
-        samlad_data += f"\n--- KÄLLSEKTION: {namn} ---\n"
-        for entry in feed.entries[:3]:
-            lank = getattr(entry, 'link', 'Länk saknas')
-            bild_url = "Ingen bild tillgänglig"
-            if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
-                bild_url = entry.media_thumbnail[0]['url']
-            elif hasattr(entry, 'enclosures') and entry.enclosures:
-                for me in entry.enclosures:
-                    if me.get('type', '').startswith('image/'):
-                        bild_url = me.get('href', bild_url)
-                        break
+        try:
+            feed = feedparser.parse(url)
+            samlad_data += f"\n--- KÄLLSEKTION: {namn} ---\n"
+            for entry in feed.entries[:3]:
+                lank = getattr(entry, 'link', 'Länk saknas')
+                bild_url = "Ingen bild tillgänglig"
+                if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
+                    bild_url = entry.media_thumbnail[0]['url']
+                elif hasattr(entry, 'enclosures') and entry.enclosures:
+                    for me in entry.enclosures:
+                        if me.get('type', '').startswith('image/'):
+                            bild_url = me.get('href', bild_url)
+                            break
 
-            samlad_data += f"Rubrik: {entry.title}\nInfo: {getattr(entry, 'summary', '')}\nLänk: {lank}\nBild: {bild_url}\nKälla: {namn}\n\n"
+                samlad_data += f"Rubrik: {entry.title}\nInfo: {getattr(entry, 'summary', '')}\nLänk: {lank}\nBild: {bild_url}\nKälla: {namn}\n\n"
+        except Exception:
+            continue
 
     return samlad_data
 
 def generera_briefing(rådata):
+    if not client:
+        return "⚠️ API-nyckel saknas. Lägg till din GEMINI_API_KEY under 'Secrets' i Streamlit Cloud."
+
     prompt = f"""
     Du är en källkritisk nyhetsanalytiker och litteraturkännare för en person som läser sista året på gymnasiet (samhällsvetenskap).
     Läsaren har nystagmus och kronisk migrän. Skriv mycket tydligt, använd korta avsnitt och ha ett lugnt, pedagogiskt tilltal.
@@ -205,22 +218,35 @@ if 'briefing' in st.session_state:
     st.markdown("---")
     st.markdown(st.session_state['briefing'], unsafe_allow_html=True)
 
-    # Sök- & Frågesektion
+    # Interaktiv AI-chatt för begrepp, utökning och specifika nyheter
     st.markdown("---")
-    st.subheader("🔎 Ställ en fråga om nyheterna eller litteraturen")
+    st.subheader("💬 AI-assistent för dina frågor")
+    st.write("Här kan du ställa frågor om ett svårt ord, be om att få en specifik nyhet expanderad, eller fråga efter andra nyheter och uppdateringar!")
 
-    användar_fråga = st.text_input("Skriv din fråga här:")
+    användar_fråga = st.text_input("Vad funderar du på? (t.ex. 'Förklara ordet ratificera', 'Expandera nyhet 3' eller 'Berätta mer om valet i USA'):")
+    
     if användar_fråga:
-        with st.spinner("Söker svar..."):
-            prompt_fråga = f"""
-            Briefing: {st.session_state['briefing']}
-            Användarens fråga: {användar_fråga}
-            Besvara pedagogiskt och sakligt på svenska.
-            """
-            svar = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt_fråga
-            )
-            st.info(svar.text)
+        if not client:
+            st.error("⚠️ API-nyckel saknas för att använda chatten.")
+        else:
+            with st.spinner("AI-assistenten funderar..."):
+                prompt_fråga = f"""
+                Du är en tålmodig och pedagogisk AI-assistent för en gymnasieelev (samhällsklass) med nystagmus och migrän.
+                
+                Här är dagens rådata som nyheterna byggdes på:
+                {st.session_state.get('rådata', 'Ingen rådata tillgänglig')}
+
+                Här är den tidigare genererade briefingen:
+                {st.session_state['briefing']}
+
+                Användarens fråga / önskemål: {användar_fråga}
+
+                Svara pedagogiskt, lugnt och tydligt på svenska. Om användaren ber om att få fördjupa en nyhet eller få en specifik nyhet/uppdatering, använd rådatan eller din kunskap för att ge ett fylligt och intressant svar.
+                """
+                svar = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt_fråga
+                )
+                st.info(svar.text)
 else:
     st.write("Klicka på knappen ovan för att starta dagens läsning.")
