@@ -207,7 +207,14 @@ st.markdown("""
         background-color: #D9D2BF !important;
         border-color: #A89F8B !important;
     }
-    .stButton>button[kind="primary"] {
+    .st-key-starta_utgava,
+    .st-key-starta_utgava .stButton {
+        display: flex !important;
+        width: 100% !important;
+        justify-content: center !important;
+        text-align: center !important;
+    }
+    .st-key-starta_utgava .stButton>button {
         display: flex !important;
         align-items: center !important;
         justify-content: center !important;
@@ -224,6 +231,15 @@ st.markdown("""
         letter-spacing: 0.5px !important;
         text-align: center !important;
         white-space: normal !important;
+    }
+    .st-key-starta_utgava .stButton>button p {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        font-family: Georgia, serif !important;
+        font-size: 19px !important;
+        line-height: 1.25 !important;
+        text-align: center !important;
     }
     input, textarea {
         background-color: #FFFFFF !important;
@@ -753,9 +769,11 @@ if nyhetsutgava and redaktionell_utgava:
     st.session_state.pop("startfel", None)
 else:
     st.session_state.pop("briefing", None)
-    knapp_vanster, knapp_mitten, knapp_hoger = st.columns([1, 3, 1])
-    with knapp_mitten:
-        starta_utgava = st.button("Starta utgåvan", type="primary")
+    starta_utgava = st.button(
+        "Starta utgåvan",
+        type="primary",
+        key="starta_utgava",
+    )
     if starta_utgava:
         with st.spinner("Hämtar källor och skapar den gemensamma utgåvan..."):
             try:
