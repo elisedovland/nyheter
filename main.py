@@ -246,6 +246,23 @@ st.markdown("""
         line-height: 1.25 !important;
         text-align: center !important;
     }
+    .button-vine {
+        width: 190px;
+        height: 52px;
+        margin: -24px auto 12px;
+        color: #7F8A68;
+    }
+    .button-vine svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    @media (max-width: 480px) {
+        .button-vine {
+            width: 160px;
+            height: 44px;
+        }
+    }
     input, textarea {
         background-color: #FFFFFF !important;
         color: #2C2A29 !important;
@@ -778,6 +795,18 @@ else:
         "Starta utgåvan",
         type="primary",
         key="starta_utgava",
+    )
+    st.markdown(
+        """
+        <div class="button-vine" aria-hidden="true">
+            <svg viewBox="0 0 190 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M95 45C88 35 75 27 58 21C49 18 40 14 33 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M95 45C102 35 115 27 132 21C141 18 150 14 157 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M67 25C61 17 54 16 49 18C53 24 59 27 67 25ZM51 18C48 11 42 9 37 11C40 16 45 19 51 18ZM123 25C129 17 136 16 141 18C137 24 131 27 123 25ZM139 18C142 11 148 9 153 11C150 16 145 19 139 18Z" fill="currentColor" fill-opacity="0.3" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+            </svg>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
     if starta_utgava:
         with st.spinner("Hämtar källor och skapar den gemensamma utgåvan..."):
