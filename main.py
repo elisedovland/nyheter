@@ -740,20 +740,13 @@ stockholm = ZoneInfo("Europe/Stockholm")
 nu = datetime.now(stockholm)
 if nu.hour < 12:
     nyhetsstart = nu.replace(hour=0, minute=0, second=0, microsecond=0)
-    nasta_nyhetsstart = nu.replace(hour=12, minute=0, second=0, microsecond=0)
 else:
     nyhetsstart = nu.replace(hour=12, minute=0, second=0, microsecond=0)
-    nasta_nyhetsstart = (nu + timedelta(days=1)).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
 nyhetsnyckel = nyhetsstart.strftime("%Y-%m-%d-%H")
 redaktionell_nyckel = nu.date().isoformat()
 nasta_redaktionella_dag = (nu + timedelta(days=1)).date()
 utgavedatum = f"{svenska_veckodagar[nu.weekday()]} {nu.day} {svenska_manader[nu.month - 1]} {nu.year} · Morgonutgåvan"
-utgavetider = (
-    f"Nyhetsutgåva kl. {nyhetsstart:%H:%M} · Nästa: {nasta_nyhetsstart:%d/%m kl. %H:%M} · "
-    f"Böcker och morgontanke: nästa {nasta_redaktionella_dag:%d/%m kl. 00:00}"
-)
+utgavetider = f"Böcker och morgontanke: nästa {nasta_redaktionella_dag:%d/%m kl. 00:00}"
 
 st.markdown(f"""
     <div class="header-box">
