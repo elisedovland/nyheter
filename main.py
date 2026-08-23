@@ -230,12 +230,27 @@ st.markdown("""
         padding: 18px !important;
         border: 3px double #756B5C !important;
         border-radius: 50% !important;
+        background: radial-gradient(
+            circle at center,
+            #F3E8B9 0%,
+            #E7D79B 52%,
+            #CDBB78 100%
+        ) !important;
+        box-shadow: inset 0 0 18px rgba(117, 107, 92, 0.08) !important;
         font-family: Georgia, serif !important;
         font-size: 19px !important;
         line-height: 1.25 !important;
         letter-spacing: 0.5px !important;
         text-align: center !important;
         white-space: normal !important;
+    }
+    .st-key-starta_utgava .stButton>button:hover {
+        background: radial-gradient(
+            circle at center,
+            #F5EBC2 0%,
+            #E9DAA0 52%,
+            #D1C081 100%
+        ) !important;
     }
     .st-key-starta_utgava .stButton>button p {
         width: 100% !important;
