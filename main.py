@@ -207,9 +207,15 @@ if 'briefing' in st.session_state:
     st.subheader("💬 AI-assistent för dina frågor")
     st.write("Här kan du ställa frågor om ett svårt ord, be om att få en specifik nyhet expanderad, eller fråga efter andra nyheter och uppdateringar!")
 
-    användar_fråga = st.text_input("Vad funderar du på? (t.ex. 'Förklara ordet ratificera', 'Expandera nyhet 3' eller 'Berätta mer om valet i USA'):")
-    
-    if användar_fråga:
+    with st.form("fraga_till_assistenten", clear_on_submit=True):
+        användar_fråga = st.text_area(
+            "Vad funderar du på? (t.ex. 'Förklara ordet ratificera', 'Expandera nyhet 3' eller 'Berätta mer om valet i USA'):",
+            height=140,
+            placeholder="Skriv din fråga här. Du kan skriva på flera rader.",
+        )
+        skicka_fråga = st.form_submit_button("Fråga AI-assistenten")
+
+    if skicka_fråga and användar_fråga.strip():
         if not model:
             st.error("⚠️ API-nyckel saknas för att använda chatten.")
         else:
