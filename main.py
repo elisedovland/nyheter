@@ -265,7 +265,7 @@ st.markdown("""
         width: 210px;
         height: 62px;
         margin: -46px auto 12px;
-        color: #3F733A;
+        color: #6F985F;
     }
     .button-vine svg {
         display: block;
