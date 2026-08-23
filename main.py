@@ -1,5 +1,9 @@
 import os
-import random
+import re
+from datetime import datetime
+from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
+
 import streamlit as st
 import feedparser
 import google.generativeai as genai
@@ -7,9 +11,34 @@ import google.generativeai as genai
 # --- 1. SIDA OCH TILLGÄNGLIGHETSINSTÄLLNINGAR ---
 st.set_page_config(
     page_title="Morgonposten – AI Briefing",
-    page_icon="☕",
+    page_icon="☀️",
     layout="centered"
 )
+
+with st.sidebar.expander("Läsinställningar", expanded=False):
+    textstorlek = st.select_slider(
+        "Textstorlek",
+        options=["Mindre", "Normal", "Större"],
+        value="Normal",
+    )
+    radavstand = st.select_slider(
+        "Radavstånd",
+        options=["Kompakt", "Luftigt", "Extra luftigt"],
+        value="Luftigt",
+    )
+    innehallsbredd = st.select_slider(
+        "Textbredd",
+        options=["Smal", "Normal", "Bred"],
+        value="Normal",
+    )
+    hog_kontrast = st.toggle("Hög kontrast", value=False)
+    minska_bilder = st.toggle("Dölj nyhetsbilder", value=False)
+
+textstorlekar = {"Mindre": 18, "Normal": 20, "Större": 23}
+radavstand_varden = {"Kompakt": 1.55, "Luftigt": 1.85, "Extra luftigt": 2.1}
+bredd_varden = {"Smal": 680, "Normal": 820, "Bred": 1000}
+bakgrund = "#FFFDF7" if hog_kontrast else "#F7F4EA"
+textfarg = "#111111" if hog_kontrast else "#2C2A29"
 
 # CSS för optimal ergonomi vid nystagmus och migrän
 st.markdown("""
@@ -71,6 +100,15 @@ st.markdown("""
         letter-spacing: 0.8px !important;
         text-align: center !important;
     }
+    .edition-date {
+        font-family: Georgia, serif !important;
+        font-size: 14px !important;
+        line-height: 1.4 !important;
+        color: #756B5C !important;
+        letter-spacing: 0.7px !important;
+        margin-top: 5px !important;
+        text-align: center !important;
+    }
     p, li, label, div {
         font-family: "Atkinson Hyperlegible", Verdana, -apple-system, sans-serif !important;
         font-size: 20px !important;
@@ -118,6 +156,27 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+st.markdown(
+    f"""
+    <style>
+    .stApp {{
+        background-color: {bakgrund} !important;
+        color: {textfarg} !important;
+    }}
+    .block-container {{
+        max-width: {bredd_varden[innehallsbredd]}px !important;
+    }}
+    p, li, label, div {{
+        font-size: {textstorlekar[textstorlek]}px !important;
+        line-height: {radavstand_varden[radavstand]} !important;
+        color: {textfarg} !important;
+    }}
+    {'.stApp img { display: none !important; }' if minska_bilder else ''}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # Konfigurera Gemini med gemini-flash-latest som fungerar med nya nycklar
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 if api_key:
@@ -138,9 +197,19 @@ def hamta_kallmaterial():
     }
 
     samlad_data = ""
+    kallstatus = []
+    artikelnummer = 1
     for namn, url in kallor.items():
         try:
-            feed = feedparser.parse(url)
+            request = Request(url, headers={"User-Agent": "Morgonposten/1.0"})
+            with urlopen(request, timeout=12) as response:
+                feed = feedparser.parse(response.read())
+
+            if getattr(feed, "bozo", False) and not feed.entries:
+                raise ValueError("RSS-flödet kunde inte tolkas")
+            if not feed.entries:
+                raise ValueError("RSS-flödet innehöll inga artiklar")
+
             samlad_data += f"\n--- KÄLLSEKTION: {namn} ---\n"
             for entry in feed.entries[:3]:
                 lank = getattr(entry, 'link', 'Länk saknas')
@@ -153,11 +222,62 @@ def hamta_kallmaterial():
                             bild_url = me.get('href', bild_url)
                             break
 
-                samlad_data += f"Rubrik: {entry.title}\nInfo: {getattr(entry, 'summary', '')}\nLänk: {lank}\nBild: {bild_url}\nKälla: {namn}\n\n"
-        except Exception:
-            continue
+                samlad_data += (
+                    f"ARTIKEL-ID: A{artikelnummer}\n"
+                    f"Rubrik: {entry.title}\n"
+                    f"Info: {getattr(entry, 'summary', '')}\n"
+                    f"Länk: {lank}\n"
+                    f"Bild: {bild_url}\n"
+                    f"Källa: {namn}\n\n"
+                )
+                artikelnummer += 1
+            kallstatus.append({"namn": namn, "ok": True, "meddelande": "Uppdaterad"})
+        except Exception as error:
+            kallstatus.append(
+                {"namn": namn, "ok": False, "meddelande": str(error) or "Okänt fel"}
+            )
 
-    return samlad_data
+    return samlad_data, kallstatus
+
+
+def visa_kallstatus(kallstatus):
+    fungerande = sum(status["ok"] for status in kallstatus)
+    st.caption(f"Källor: {fungerande} av {len(kallstatus)} uppdaterades.")
+    with st.expander("Visa källstatus", expanded=fungerande == 0):
+        for status in kallstatus:
+            markering = "✓" if status["ok"] else "–"
+            st.write(f"{markering} **{status['namn']}** — {status['meddelande']}")
+
+
+def dela_upp_briefing(briefing):
+    rubriker = list(re.finditer(r"(?m)^###\s+(.+?)\s*$", briefing))
+    if not rubriker:
+        return []
+
+    sektioner = []
+    for index, rubrik in enumerate(rubriker):
+        start = rubrik.end()
+        slut = rubriker[index + 1].start() if index + 1 < len(rubriker) else len(briefing)
+        innehall = briefing[start:slut].strip()
+        kort_sagt = re.search(r"\*\*Kort sagt:\*\*\s*(.+?)(?:\n\n|$)", innehall, re.DOTALL)
+        sammanfattning = kort_sagt.group(1).strip() if kort_sagt else "Öppna avsnittet för att läsa mer."
+        if kort_sagt:
+            innehall = (innehall[:kort_sagt.start()] + innehall[kort_sagt.end():]).strip()
+        sektioner.append((rubrik.group(1), sammanfattning, innehall))
+    return sektioner
+
+
+def visa_briefing(briefing):
+    sektioner = dela_upp_briefing(briefing)
+    if not sektioner:
+        st.markdown(briefing)
+        return
+
+    for rubrik, sammanfattning, innehall in sektioner:
+        st.markdown(f"### {rubrik}")
+        st.markdown(f"**Kort sagt:** {sammanfattning}")
+        with st.expander("Läs hela avsnittet"):
+            st.markdown(innehall)
 
 def generera_briefing(rådata):
     if not model:
@@ -167,50 +287,69 @@ def generera_briefing(rådata):
     Du är en källkritisk nyhetsanalytiker och litteraturkännare för en person som läser sista året på gymnasiet (samhällsvetenskap).
     Läsaren har nystagmus och kronisk migrän. Skriv mycket tydligt, använd korta avsnitt och ha ett lugnt, pedagogiskt tilltal.
 
-    Här är rådata från det senaste dygnet:
+    Här är ditt enda tillåtna nyhetsunderlag från det senaste dygnet:
     {rådata}
+
+    KÄLLREGLER FÖR NYHETER:
+    - Använd endast fakta som uttryckligen finns i nyhetsunderlaget ovan. Fyll inte luckor med egen kunskap.
+    - Om underlaget inte räcker för en sektion, skriv tydligt att säkert underlag saknas. Hitta inte på en nyhet.
+    - Varje nyhetsartikel måste avslutas med exakt artikel-ID, källnamn och den länk som hör till artikeln i underlaget.
+    - Kopiera länken exakt. Skapa eller gissa aldrig en länk eller bildlänk.
+    - Skilj tydligt mellan verifierade uppgifter och analys. Inled analys med "Analys:".
+    - Bokrekommendationerna och morgonens tanke är redaktionellt material och omfattas inte av kravet på RSS-källa.
 
     Skapa en morgonbriefing på SVENSKA med exakt följande rubrikstruktur:
 
-    1. ### 🇸🇪 1. SVERIGE & VALET
-    <small>Inrikespolitik, lagförslag och riksdagsbeslut</small>
+    ### 🇸🇪 1. SVERIGE & VALET
+    *Inrikespolitik, lagförslag och riksdagsbeslut*
+    **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (250-400 ord)
 
-    2. ### 🇳🇴 2. NORDEN
-    <small>Samhälle och utveckling i grannländerna</small>
+    ### 🇳🇴 2. NORDEN
+    *Samhälle och utveckling i grannländerna*
+    **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (250-400 ord)
 
-    3. ### 🏛️ 3. GLOBALT – GEOPOLITIK
-    <small>Internationell politik och djupanalys</small>
+    ### 🏛️ 3. GLOBALT – GEOPOLITIK
+    *Internationell politik och djupanalys*
+    **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (350-500 ord)
 
-    4. ### ⚖️ 4. GLOBALT – MÄNSKLIGA RÄTTIGHETER
-    <small>Internationella relationer, FN och EU</small>
+    ### ⚖️ 4. GLOBALT – MÄNSKLIGA RÄTTIGHETER
+    *Internationella relationer, FN och EU*
+    **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (250-400 ord)
 
-    5. ### 📈 5. GLOBALT – SAMHÄLLE & EKONOMI
-    <small>Demografi och global utveckling</small>
+    ### 📈 5. GLOBALT – SAMHÄLLE & EKONOMI
+    *Demografi och global utveckling*
+    **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (250-400 ord)
 
-    6. ### 🤖 6. TEKNIK & AI
-    <small>Tekniska genombrott och ny lagstiftning</small>
+    ### 🤖 6. TEKNIK & AI
+    *Tekniska genombrott och ny lagstiftning*
+    **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (150-250 ord)
 
-    7. ### 🔬 7. VETENSKAP & HÄLSA
-    <small>Medicinska och miljömässiga upptäckter</small>
+    ### 🔬 7. VETENSKAP & HÄLSA
+    *Medicinska och miljömässiga upptäckter*
+    **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (150-250 ord)
 
-    8. ### 📚 8. DAGENS KLASSIKER
+    ### 📚 8. DAGENS KLASSIKER
+    **Kort sagt:** Presentera boken i en kort mening.
     En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken. Titel, författare, utgivningsår, genre, blurb (3-4 meningar) och bildlänk till omslaget.
 
-    9. ### 📖 9. DAGENS NYA BOKREKOMMENDATION
+    ### 📖 9. DAGENS NYA BOKREKOMMENDATION
+    **Kort sagt:** Presentera boken i en kort mening.
     En nyligen utgiven bok. Inga parenteser i rubriken. Titel, författare, utgivningsår, genre, blurb (3-4 meningar) och bildlänk till omslaget.
 
-    10. ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
+    ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
+    **Kort sagt:** Ge en kort inledning utan att avslöja hela poängen.
     Ge antingen ett rart, fundersamt filosofiskt citat/tanke eller ett oskyldigt, trevligt skämt för att avsluta rapporten på ett varmt sätt.
 
     REGLER:
-    - Inkludera källa, artikel-länk och bildlänk längst ned i varje nyhet.
+    - Skriv källraden som: Källa: [KÄLLNAMN](EXAKT LÄNK) · Artikel-ID: A1
+    - Inkludera bildlänk endast när underlaget innehåller en verklig bildlänk.
     - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
     """
 
@@ -218,7 +357,17 @@ def generera_briefing(rådata):
     return response.text
 
 # --- 2. HUVUDGRÄNSSNITT ---
-st.markdown("""
+svenska_veckodagar = [
+    "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag", "Söndag"
+]
+svenska_manader = [
+    "januari", "februari", "mars", "april", "maj", "juni",
+    "juli", "augusti", "september", "oktober", "november", "december",
+]
+nu = datetime.now(ZoneInfo("Europe/Stockholm"))
+utgavedatum = f"{svenska_veckodagar[nu.weekday()]} {nu.day} {svenska_manader[nu.month - 1]} {nu.year} · Morgonutgåvan"
+
+st.markdown(f"""
     <div class="header-box">
         <div class="masthead">
             <svg class="sun-symbol" aria-hidden="true" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -236,19 +385,28 @@ st.markdown("""
             </svg>
         </div>
         <div class="header-subtitle">Lugn AI-briefing &amp; litteratur i din egen takt</div>
+        <div class="edition-date">{utgavedatum}</div>
     </div>
 """, unsafe_allow_html=True)
 
 if st.button("☕ Hämta morgonens nyheter"):
     with st.spinner("Hämtar dagens nyheter i lugn och ro..."):
-        nyhetsdata = hamta_kallmaterial()
-        st.session_state['briefing'] = generera_briefing(nyhetsdata)
+        nyhetsdata, kallstatus = hamta_kallmaterial()
+        st.session_state['kallstatus'] = kallstatus
         st.session_state['rådata'] = nyhetsdata
+        if nyhetsdata:
+            st.session_state['briefing'] = generera_briefing(nyhetsdata)
+        else:
+            st.session_state.pop('briefing', None)
+            st.error("Inga nyhetskällor kunde hämtas. Försök igen om en stund.")
+
+if 'kallstatus' in st.session_state:
+    visa_kallstatus(st.session_state['kallstatus'])
 
 # Visa briefing om den finns i minnet
 if 'briefing' in st.session_state:
     st.markdown("---")
-    st.markdown(st.session_state['briefing'], unsafe_allow_html=True)
+    visa_briefing(st.session_state['briefing'])
 
     # Interaktiv AI-chatt för begrepp, utökning och specifika nyheter
     st.markdown("---")
@@ -279,7 +437,10 @@ if 'briefing' in st.session_state:
 
                 Användarens fråga / önskemål: {användar_fråga}
 
-                Svara pedagogiskt, lugnt och tydligt på svenska. Om användaren ber om att få fördjupa en nyhet eller få en specifik nyhet/uppdatering, använd rådatan eller din kunskap för att ge ett fylligt och intressant svar.
+                Svara pedagogiskt, lugnt och tydligt på svenska. För aktuella nyheter får du endast använda rådatan ovan.
+                Ange källnamn och kopiera artikelns länk exakt när du beskriver en nyhetsuppgift. Om frågan inte kan
+                besvaras från rådatan ska du säga att uppgiften inte kan verifieras i dagens källunderlag. Använd inte
+                egen kunskap för aktuella nyhetspåståenden och hitta aldrig på en källa eller länk.
                 """
                 svar = model.generate_content(prompt_fråga)
                 st.info(svar.text)
