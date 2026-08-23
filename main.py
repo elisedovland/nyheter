@@ -35,7 +35,6 @@ with st.sidebar.expander("Läsinställningar", expanded=False):
         value="Normal",
     )
     hog_kontrast = st.toggle("Hög kontrast", value=False)
-    minska_bilder = st.toggle("Dölj nyhetsbilder", value=False)
 
 textstorlekar = {"Mindre": 18, "Normal": 20, "Större": 23}
 radavstand_varden = {"Kompakt": 1.55, "Luftigt": 1.85, "Extra luftigt": 2.1}
@@ -133,10 +132,6 @@ st.markdown("""
         display: block;
         margin-bottom: 14px !important;
     }
-    img {
-        border-radius: 6px;
-        filter: brightness(0.95) contrast(0.95);
-    }
     .stButton>button {
         background-color: #E6E0D0 !important;
         color: #2C2A29 !important;
@@ -174,7 +169,6 @@ st.markdown(
         line-height: {radavstand_varden[radavstand]} !important;
         color: {textfarg} !important;
     }}
-    {'.stApp img { display: none !important; }' if minska_bilder else ''}
     </style>
     """,
     unsafe_allow_html=True,
@@ -225,20 +219,11 @@ def hamta_en_kalla(kalla):
             lank = str(getattr(entry, "link", "")).strip()
             rubrik = rensa_rss_text(getattr(entry, "title", "Rubrik saknas"), 220)
             sammanfattning = rensa_rss_text(getattr(entry, "summary", ""))
-            bild_url = ""
-            if hasattr(entry, "media_thumbnail") and entry.media_thumbnail:
-                bild_url = entry.media_thumbnail[0].get("url", "")
-            elif hasattr(entry, "enclosures") and entry.enclosures:
-                for enclosure in entry.enclosures:
-                    if enclosure.get("type", "").startswith("image/"):
-                        bild_url = enclosure.get("href", "")
-                        break
             artiklar.append(
                 {
                     "rubrik": rubrik,
                     "sammanfattning": sammanfattning,
                     "lank": lank,
-                    "bild": bild_url,
                     "kalla": namn,
                 }
             )
@@ -283,7 +268,6 @@ def hamta_kallmaterial():
                     f"Rubrik: {artikel['rubrik']}",
                     f"Info: {artikel['sammanfattning']}",
                     f"Länk: {artikel['lank']}",
-                    f"Bild: {artikel['bild'] or 'Ingen bild tillgänglig'}",
                     f"Källa: {artikel['kalla']}",
                 ]
             )
@@ -459,7 +443,8 @@ def generera_briefing(rådata, variant=0):
     - Använd endast fakta som uttryckligen finns i nyhetsunderlaget ovan. Fyll inte luckor med egen kunskap.
     - Om underlaget inte räcker för en sektion, skriv tydligt att säkert underlag saknas. Hitta inte på en nyhet.
     - Varje nyhetsartikel måste avslutas med exakt artikel-ID, källnamn och den länk som hör till artikeln i underlaget.
-    - Kopiera länken exakt. Skapa eller gissa aldrig en länk eller bildlänk.
+    - Kopiera nyhetslänken exakt. Skapa eller gissa aldrig en länk.
+    - Inkludera inga bilder, bildadresser, omslagsbilder eller länkar till bilder.
     - Skilj tydligt mellan verifierade uppgifter och analys. Inled analys med "Analys:".
     - Utelämna helt en nyhetssektion (1-7) om det inte finns en relevant artikel i underlaget.
       Appen visar då automatiskt att säkert underlag saknas. Skriv inte utfyllnad om frånvaron.
@@ -505,11 +490,11 @@ def generera_briefing(rådata, variant=0):
 
     ### 📚 8. DAGENS KLASSIKER
     **Kort sagt:** Presentera boken i en kort mening.
-    En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar samt bildlänk till omslaget.
+    En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar.
 
     ### 📖 9. DAGENS NYA BOKREKOMMENDATION
     **Kort sagt:** Presentera boken i en kort mening.
-    En nyligen utgiven bok. Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar samt bildlänk till omslaget.
+    En nyligen utgiven bok. Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar.
 
     ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
     **Kort sagt:** Ge en kort inledning utan att avslöja hela poängen.
@@ -517,7 +502,6 @@ def generera_briefing(rådata, variant=0):
 
     REGLER:
     - Skriv källraden som: Källa: [KÄLLNAMN](EXAKT LÄNK) · Artikel-ID: A1
-    - Inkludera bildlänk endast när underlaget innehåller en verklig bildlänk.
     - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
     """
 
