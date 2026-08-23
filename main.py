@@ -818,7 +818,7 @@ else:
             <svg viewBox="0 0 210 62" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M105 59C97 45 80 33 60 25C46 19 34 11 27 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
                 <path d="M105 59C113 45 130 33 150 25C164 19 176 11 183 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                <path d="M72 31C65 22 57 20 52 23C56 29 63 33 72 31ZM54 22C50 14 43 11 38 13C42 19 48 23 54 22ZM38 13C35 7 29 5 25 7C28 12 33 14 38 13ZM30 9C24 3 18 1 14 4C18 9 23 11 30 9ZM138 31C145 22 153 20 158 23C154 29 147 33 138 31ZM156 22C160 14 167 11 172 13C168 19 162 23 156 22ZM172 13C175 7 181 5 185 7C182 12 177 14 172 13ZM180 9C186 3 192 1 196 4C192 9 187 11 180 9Z" fill="currentColor" fill-opacity="0.38" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+                <path d="M72 31C65 22 57 20 52 23C56 29 63 33 72 31ZM54 22C50 14 43 11 38 13C42 19 48 23 54 22ZM38 13C35 7 29 5 25 7C28 12 33 14 38 13ZM30 9C25 2 19 0 14 1C17 7 23 10 30 9ZM138 31C145 22 153 20 158 23C154 29 147 33 138 31ZM156 22C160 14 167 11 172 13C168 19 162 23 156 22ZM172 13C175 7 181 5 185 7C182 12 177 14 172 13ZM180 9C185 2 191 0 196 1C193 7 187 10 180 9Z" fill="currentColor" fill-opacity="0.38" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
             </svg>
         </div>
         """,
