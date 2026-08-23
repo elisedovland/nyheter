@@ -1,6 +1,7 @@
 import html
 import os
 import re
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -206,6 +207,20 @@ st.markdown("""
         background-color: #D9D2BF !important;
         border-color: #A89F8B !important;
     }
+    .stButton>button[kind="primary"] {
+        display: block !important;
+        width: 118px !important;
+        height: 118px !important;
+        min-height: 118px !important;
+        margin: 18px auto 10px !important;
+        padding: 12px !important;
+        border: 3px double #756B5C !important;
+        border-radius: 50% !important;
+        font-family: Georgia, serif !important;
+        font-size: 17px !important;
+        line-height: 1.25 !important;
+        letter-spacing: 0.5px !important;
+    }
     input, textarea {
         background-color: #FFFFFF !important;
         color: #2C2A29 !important;
@@ -242,6 +257,13 @@ if api_key:
     model = genai.GenerativeModel('gemini-flash-latest')
 else:
     model = None
+
+
+@st.cache_resource
+def hamta_utgavelager():
+    """Dela färdiga utgåvor mellan appens besökare så länge processen körs."""
+    return {"nyheter": {}, "redaktionellt": {}, "lock": threading.Lock()}
+
 
 KALLOR = {
     "SVT Nyheter": "https://www.svt.se/nyheter/rss.xml",
@@ -709,57 +731,83 @@ elif st.session_state.get("aktiv_redaktionell_nyckel") != redaktionell_nyckel:
 st.session_state["aktiv_nyhetsnyckel"] = nyhetsnyckel
 st.session_state["aktiv_redaktionell_nyckel"] = redaktionell_nyckel
 
-knappkolumn_1, knappkolumn_2 = st.columns(2)
-with knappkolumn_1:
-    uppdatera_kallor = st.button("1. Hämta aktuell nyhetsutgåva", use_container_width=True)
-with knappkolumn_2:
-    skapa_briefing = st.button(
-        "2. Skapa morgonbriefing",
-        disabled=not bool(st.session_state.get("rådata")),
-        use_container_width=True,
-    )
+utgavelager = hamta_utgavelager()
+nyhetsutgava = utgavelager["nyheter"].get(nyhetsnyckel)
+redaktionell_utgava = utgavelager["redaktionellt"].get(redaktionell_nyckel)
 
-if uppdatera_kallor:
-    with st.spinner("Hämtar dagens källor i lugn och ro..."):
-        starttid = time.perf_counter()
-        nyhetsdata, kallstatus, artiklar = hamta_kallmaterial(nyhetsnyckel)
-        st.session_state["prestanda"]["rss_sekunder"] = time.perf_counter() - starttid
-        st.session_state["prestanda"]["antal_artiklar"] = len(artiklar)
-        st.session_state["prestanda"]["indatatecken"] = len(nyhetsdata)
-        st.session_state["kallstatus"] = kallstatus
-        st.session_state["artiklar"] = artiklar
-        if nyhetsdata != st.session_state.get("rådata"):
-            st.session_state.pop("briefing", None)
-            st.session_state["fordjupningar"] = {}
-        st.session_state["rådata"] = nyhetsdata
-        st.session_state["kallfel"] = not bool(nyhetsdata)
-    st.rerun()
+if nyhetsutgava and redaktionell_utgava:
+    briefing = f"{nyhetsutgava['text']}\n\n{redaktionell_utgava['text']}".strip()
+    st.session_state["rådata"] = nyhetsutgava["rådata"]
+    st.session_state["artiklar"] = nyhetsutgava["artiklar"]
+    st.session_state["kallstatus"] = nyhetsutgava["kallstatus"]
+    st.session_state["briefing"] = briefing
+    st.session_state["prestanda"] = {
+        **nyhetsutgava["prestanda"],
+        **redaktionell_utgava["prestanda"],
+        "utdataord": len(briefing.split()),
+    }
+    st.session_state.pop("startfel", None)
+else:
+    st.session_state.pop("briefing", None)
+    st.info("Den aktuella utgåvan är inte skapad ännu. Den första besökaren startar den här.")
+    starta_utgava = st.button("Starta utgåvan", type="primary")
+    if starta_utgava:
+        with st.spinner("Hämtar källor och skapar den gemensamma utgåvan..."):
+            try:
+                if not model:
+                    raise RuntimeError("API-nyckel saknas")
+                with utgavelager["lock"]:
+                    nyhetsutgava = utgavelager["nyheter"].get(nyhetsnyckel)
+                    if not nyhetsutgava:
+                        starttid = time.perf_counter()
+                        nyhetsdata, kallstatus, artiklar = hamta_kallmaterial(nyhetsnyckel)
+                        rss_sekunder = time.perf_counter() - starttid
+                        if not nyhetsdata:
+                            hamta_kallmaterial.clear()
+                            raise RuntimeError("Inga nyhetskällor kunde hämtas")
 
-if skapa_briefing:
-    with st.spinner("Skapar en kort morgonbriefing..."):
-        try:
-            starttid = time.perf_counter()
-            nyhetsbriefing = generera_nyhetsbriefing(
-                st.session_state["rådata"],
-                nyhetsnyckel,
-            )
-            st.session_state["prestanda"]["nyheter_ai_sekunder"] = (
-                time.perf_counter() - starttid
-            )
-            starttid = time.perf_counter()
-            redaktionellt = generera_redaktionellt(redaktionell_nyckel)
-            st.session_state["prestanda"]["redaktionellt_ai_sekunder"] = (
-                time.perf_counter() - starttid
-            )
-            briefing = f"{nyhetsbriefing}\n\n{redaktionellt}".strip()
-            st.session_state["prestanda"]["utdataord"] = len(briefing.split())
-            st.session_state["briefing"] = briefing
-            st.session_state["fordjupningar"] = {}
-        except Exception:
-            st.error("Briefingen kunde inte skapas just nu. Källorna är sparade, så du kan försöka igen.")
+                        starttid = time.perf_counter()
+                        nyhetstext = generera_nyhetsbriefing(nyhetsdata, nyhetsnyckel)
+                        nyheter_ai_sekunder = time.perf_counter() - starttid
+                        nyhetsutgava = {
+                            "text": nyhetstext,
+                            "rådata": nyhetsdata,
+                            "artiklar": artiklar,
+                            "kallstatus": kallstatus,
+                            "prestanda": {
+                                "rss_sekunder": rss_sekunder,
+                                "nyheter_ai_sekunder": nyheter_ai_sekunder,
+                                "antal_artiklar": len(artiklar),
+                                "indatatecken": len(nyhetsdata),
+                            },
+                        }
+                        utgavelager["nyheter"].clear()
+                        utgavelager["nyheter"][nyhetsnyckel] = nyhetsutgava
 
-if st.session_state.get("kallfel"):
-    st.error("Inga nyhetskällor kunde hämtas. Försök igen om en stund.")
+                    redaktionell_utgava = utgavelager["redaktionellt"].get(
+                        redaktionell_nyckel
+                    )
+                    if not redaktionell_utgava:
+                        starttid = time.perf_counter()
+                        redaktionstext = generera_redaktionellt(redaktionell_nyckel)
+                        if not redaktionstext:
+                            raise RuntimeError("Redaktionellt innehåll kunde inte skapas")
+                        redaktionell_utgava = {
+                            "text": redaktionstext,
+                            "prestanda": {
+                                "redaktionellt_ai_sekunder": time.perf_counter() - starttid
+                            },
+                        }
+                        utgavelager["redaktionellt"].clear()
+                        utgavelager["redaktionellt"][redaktionell_nyckel] = (
+                            redaktionell_utgava
+                        )
+                st.rerun()
+            except Exception:
+                st.session_state["startfel"] = True
+
+if st.session_state.get("startfel"):
+    st.error("Utgåvan kunde inte skapas just nu. Försök igen om en stund.")
 
 if 'kallstatus' in st.session_state:
     visa_kallstatus(st.session_state['kallstatus'])
@@ -844,5 +892,3 @@ if 'briefing' in st.session_state:
                     st.info(svar)
                 except Exception:
                     st.error("Assistenten kunde inte svara just nu. Försök igen senare.")
-else:
-    st.write("Börja med att hämta den aktuella nyhetsutgåvan och skapa sedan morgonbriefingen.")
