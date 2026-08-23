@@ -208,18 +208,22 @@ st.markdown("""
         border-color: #A89F8B !important;
     }
     .stButton>button[kind="primary"] {
-        display: block !important;
-        width: 118px !important;
-        height: 118px !important;
-        min-height: 118px !important;
-        margin: 18px auto 10px !important;
-        padding: 12px !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        width: 150px !important;
+        height: 150px !important;
+        min-height: 150px !important;
+        margin: 22px auto 14px !important;
+        padding: 18px !important;
         border: 3px double #756B5C !important;
         border-radius: 50% !important;
         font-family: Georgia, serif !important;
-        font-size: 17px !important;
+        font-size: 19px !important;
         line-height: 1.25 !important;
         letter-spacing: 0.5px !important;
+        text-align: center !important;
+        white-space: normal !important;
     }
     input, textarea {
         background-color: #FFFFFF !important;
@@ -749,8 +753,9 @@ if nyhetsutgava and redaktionell_utgava:
     st.session_state.pop("startfel", None)
 else:
     st.session_state.pop("briefing", None)
-    st.info("Den aktuella utgåvan är inte skapad ännu. Den första besökaren startar den här.")
-    starta_utgava = st.button("Starta utgåvan", type="primary")
+    knapp_vanster, knapp_mitten, knapp_hoger = st.columns([1, 3, 1])
+    with knapp_mitten:
+        starta_utgava = st.button("Starta utgåvan", type="primary")
     if starta_utgava:
         with st.spinner("Hämtar källor och skapar den gemensamma utgåvan..."):
             try:
