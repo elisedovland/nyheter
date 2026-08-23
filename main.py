@@ -262,9 +262,9 @@ st.markdown("""
         text-align: center !important;
     }
     .button-vine {
-        width: 190px;
-        height: 58px;
-        margin: -38px auto 12px;
+        width: 210px;
+        height: 62px;
+        margin: -46px auto 12px;
         color: #557C45;
     }
     .button-vine svg {
@@ -274,9 +274,9 @@ st.markdown("""
     }
     @media (max-width: 480px) {
         .button-vine {
-            width: 160px;
-            height: 50px;
-            margin-top: -32px;
+            width: 180px;
+            height: 54px;
+            margin-top: -39px;
         }
     }
     input, textarea {
@@ -815,10 +815,10 @@ else:
     st.markdown(
         """
         <div class="button-vine" aria-hidden="true">
-            <svg viewBox="0 0 190 58" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M95 54C88 42 75 31 58 23C48 18 41 11 37 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                <path d="M95 54C102 42 115 31 132 23C142 18 149 11 153 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                <path d="M68 29C61 20 54 19 49 21C53 27 59 31 68 29ZM52 20C49 12 43 9 38 11C41 17 46 21 52 20ZM122 29C129 20 136 19 141 21C137 27 131 31 122 29ZM138 20C141 12 147 9 152 11C149 17 144 21 138 20Z" fill="currentColor" fill-opacity="0.38" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+            <svg viewBox="0 0 210 62" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M105 59C97 45 80 33 60 25C46 19 34 11 27 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M105 59C113 45 130 33 150 25C164 19 176 11 183 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M72 31C65 22 57 20 52 23C56 29 63 33 72 31ZM54 22C50 14 43 11 38 13C42 19 48 23 54 22ZM38 13C35 7 29 5 25 7C28 12 33 14 38 13ZM138 31C145 22 153 20 158 23C154 29 147 33 138 31ZM156 22C160 14 167 11 172 13C168 19 162 23 156 22ZM172 13C175 7 181 5 185 7C182 12 177 14 172 13Z" fill="currentColor" fill-opacity="0.38" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
             </svg>
         </div>
         """,
