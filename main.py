@@ -3,7 +3,7 @@ import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -293,9 +293,10 @@ def hamta_en_kalla(kalla):
         return namn, [], str(error) or "Okänt fel"
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def hamta_kallmaterial():
-    """Hämta, rensa och återanvänd RSS-underlag i högst 15 minuter."""
+@st.cache_data(ttl=86400, show_spinner=False)
+def hamta_kallmaterial(nyhetsnyckel):
+    """Hämta RSS-underlag en gång per schemalagd nyhetsutgåva."""
+    _ = nyhetsnyckel
     with ThreadPoolExecutor(max_workers=4) as executor:
         resultat = list(executor.map(hamta_en_kalla, KALLOR.items()))
 
@@ -339,7 +340,7 @@ def hamta_kallmaterial():
 def visa_kallstatus(kallstatus):
     fungerande = sum(status["ok"] for status in kallstatus)
     st.caption(f"Källor: {fungerande} av {len(kallstatus)} uppdaterades.")
-    st.caption("RSS-underlaget återanvänds i upp till 15 minuter för snabbare laddning.")
+    st.caption("RSS-underlaget är låst till den aktuella 12-timmarsutgåvan.")
     with st.expander("Visa källstatus", expanded=fungerande == 0):
         for status in kallstatus:
             markering = "✓" if status["ok"] else "–"
@@ -538,18 +539,18 @@ def visa_briefing(briefing, artiklar):
                     st.markdown(st.session_state["fordjupningar"][nummer])
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
-def generera_briefing(rådata, variant=0):
-    """Skapa en kort briefing och återanvänd den när underlaget är oförändrat."""
-    _ = variant
+@st.cache_data(ttl=172800, show_spinner=False)
+def generera_nyhetsbriefing(rådata, nyhetsnyckel):
+    """Skapa nyhetsdelarna en gång per 12-timmarsutgåva."""
     if not model:
         return "⚠️ API-nyckel saknas. Lägg till din GEMINI_API_KEY under 'Secrets' i Streamlit Cloud."
 
     prompt = f"""
-    Du är en källkritisk nyhetsanalytiker och litteraturkännare för en person som läser sista året på gymnasiet (samhällsvetenskap).
+    Du är en källkritisk nyhetsanalytiker för en person som läser sista året på gymnasiet (samhällsvetenskap).
     Läsaren har nystagmus och kronisk migrän. Skriv mycket tydligt, använd korta avsnitt och ha ett lugnt, pedagogiskt tilltal.
+    Den schemalagda nyhetsutgåvan är {nyhetsnyckel} i tidszonen Europe/Stockholm.
 
-    Här är ditt enda tillåtna nyhetsunderlag från det senaste dygnet:
+    Här är ditt enda tillåtna nyhetsunderlag:
     {rådata}
 
     KÄLLREGLER FÖR NYHETER:
@@ -561,9 +562,8 @@ def generera_briefing(rådata, variant=0):
     - Skilj tydligt mellan verifierade uppgifter och analys. Inled analys med "Analys:".
     - Utelämna helt en nyhetssektion (1-7) om det inte finns en relevant artikel i underlaget.
       Appen visar då automatiskt att säkert underlag saknas. Skriv inte utfyllnad om frånvaron.
-    - Bokrekommendationerna och morgonens tanke är redaktionellt material och omfattas inte av kravet på RSS-källa.
 
-    Skapa en koncentrerad morgonbriefing på SVENSKA. Hela svaret ska vara ungefär 700-1 000 ord.
+    Skapa nyhetsdelen på SVENSKA. Hela svaret ska vara ungefär 550-800 ord.
     Använd följande rubriker för de sektioner som har underlag:
 
     ### 🇸🇪 1. SVERIGE & VALET
@@ -601,6 +601,26 @@ def generera_briefing(rådata, variant=0):
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
     (70-100 ord)
 
+    REGLER:
+    - Skriv källraden som: Källa: [KÄLLNAMN](EXAKT LÄNK) · Artikel-ID: A1
+    - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
+    """
+
+    return model.generate_content(prompt).text
+
+
+@st.cache_data(ttl=172800, show_spinner=False)
+def generera_redaktionellt(dagsnyckel):
+    """Skapa boktips och morgontanke en gång per Stockholmsdatum."""
+    if not model:
+        return ""
+
+    prompt = f"""
+    Du är litteraturkännare och redaktör för en lugn svensk morgontidning. Skapa dagens
+    redaktionella innehåll för {dagsnyckel} i tidszonen Europe/Stockholm. Samma innehåll ska
+    användas hela dagen. Skriv tydligt, varmt och kortfattat. Inkludera inga bilder,
+    bildadresser, omslagsbilder eller länkar till bilder.
+
     ### 📚 8. DAGENS KLASSIKER
     **Kort sagt:** Presentera boken i en kort mening.
     En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken.
@@ -624,14 +644,9 @@ def generera_briefing(rådata, variant=0):
     ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
     **Kort sagt:** Ge en kort inledning utan att avslöja hela poängen.
     Ge antingen ett rart, fundersamt filosofiskt citat/tanke eller ett oskyldigt, trevligt skämt för att avsluta rapporten på ett varmt sätt.
-
-    REGLER:
-    - Skriv källraden som: Källa: [KÄLLNAMN](EXAKT LÄNK) · Artikel-ID: A1
-    - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
     """
 
-    response = model.generate_content(prompt)
-    return response.text
+    return model.generate_content(prompt).text
 
 # --- 2. HUVUDGRÄNSSNITT ---
 svenska_veckodagar = [
@@ -641,8 +656,24 @@ svenska_manader = [
     "januari", "februari", "mars", "april", "maj", "juni",
     "juli", "augusti", "september", "oktober", "november", "december",
 ]
-nu = datetime.now(ZoneInfo("Europe/Stockholm"))
+stockholm = ZoneInfo("Europe/Stockholm")
+nu = datetime.now(stockholm)
+if nu.hour < 12:
+    nyhetsstart = nu.replace(hour=0, minute=0, second=0, microsecond=0)
+    nasta_nyhetsstart = nu.replace(hour=12, minute=0, second=0, microsecond=0)
+else:
+    nyhetsstart = nu.replace(hour=12, minute=0, second=0, microsecond=0)
+    nasta_nyhetsstart = (nu + timedelta(days=1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+nyhetsnyckel = nyhetsstart.strftime("%Y-%m-%d-%H")
+redaktionell_nyckel = nu.date().isoformat()
+nasta_redaktionella_dag = (nu + timedelta(days=1)).date()
 utgavedatum = f"{svenska_veckodagar[nu.weekday()]} {nu.day} {svenska_manader[nu.month - 1]} {nu.year} · Morgonutgåvan"
+utgavetider = (
+    f"Nyhetsutgåva kl. {nyhetsstart:%H:%M} · Nästa: {nasta_nyhetsstart:%d/%m kl. %H:%M} · "
+    f"Böcker och morgontanke: nästa {nasta_redaktionella_dag:%d/%m kl. 00:00}"
+)
 
 st.markdown(f"""
     <div class="header-box">
@@ -663,15 +694,24 @@ st.markdown(f"""
         </div>
         <div class="header-subtitle">Lugn AI-briefing &amp; litteratur i din egen takt</div>
         <div class="edition-date">{utgavedatum}</div>
+        <div class="edition-date">{utgavetider}</div>
     </div>
 """, unsafe_allow_html=True)
 
 st.session_state.setdefault("prestanda", {})
-st.session_state.setdefault("briefing_variant", 0)
+if st.session_state.get("aktiv_nyhetsnyckel") != nyhetsnyckel:
+    for nyckel in ("rådata", "artiklar", "kallstatus", "briefing"):
+        st.session_state.pop(nyckel, None)
+    st.session_state["fordjupningar"] = {}
+elif st.session_state.get("aktiv_redaktionell_nyckel") != redaktionell_nyckel:
+    st.session_state.pop("briefing", None)
+    st.session_state["fordjupningar"] = {}
+st.session_state["aktiv_nyhetsnyckel"] = nyhetsnyckel
+st.session_state["aktiv_redaktionell_nyckel"] = redaktionell_nyckel
 
 knappkolumn_1, knappkolumn_2 = st.columns(2)
 with knappkolumn_1:
-    uppdatera_kallor = st.button("1. Uppdatera källor", use_container_width=True)
+    uppdatera_kallor = st.button("1. Hämta aktuell nyhetsutgåva", use_container_width=True)
 with knappkolumn_2:
     skapa_briefing = st.button(
         "2. Skapa morgonbriefing",
@@ -682,7 +722,7 @@ with knappkolumn_2:
 if uppdatera_kallor:
     with st.spinner("Hämtar dagens källor i lugn och ro..."):
         starttid = time.perf_counter()
-        nyhetsdata, kallstatus, artiklar = hamta_kallmaterial()
+        nyhetsdata, kallstatus, artiklar = hamta_kallmaterial(nyhetsnyckel)
         st.session_state["prestanda"]["rss_sekunder"] = time.perf_counter() - starttid
         st.session_state["prestanda"]["antal_artiklar"] = len(artiklar)
         st.session_state["prestanda"]["indatatecken"] = len(nyhetsdata)
@@ -691,20 +731,27 @@ if uppdatera_kallor:
         if nyhetsdata != st.session_state.get("rådata"):
             st.session_state.pop("briefing", None)
             st.session_state["fordjupningar"] = {}
-            st.session_state["briefing_variant"] = 0
         st.session_state["rådata"] = nyhetsdata
         st.session_state["kallfel"] = not bool(nyhetsdata)
     st.rerun()
 
 if skapa_briefing:
     with st.spinner("Skapar en kort morgonbriefing..."):
-        starttid = time.perf_counter()
         try:
-            briefing = generera_briefing(
+            starttid = time.perf_counter()
+            nyhetsbriefing = generera_nyhetsbriefing(
                 st.session_state["rådata"],
-                st.session_state["briefing_variant"],
+                nyhetsnyckel,
             )
-            st.session_state["prestanda"]["ai_sekunder"] = time.perf_counter() - starttid
+            st.session_state["prestanda"]["nyheter_ai_sekunder"] = (
+                time.perf_counter() - starttid
+            )
+            starttid = time.perf_counter()
+            redaktionellt = generera_redaktionellt(redaktionell_nyckel)
+            st.session_state["prestanda"]["redaktionellt_ai_sekunder"] = (
+                time.perf_counter() - starttid
+            )
+            briefing = f"{nyhetsbriefing}\n\n{redaktionellt}".strip()
             st.session_state["prestanda"]["utdataord"] = len(briefing.split())
             st.session_state["briefing"] = briefing
             st.session_state["fordjupningar"] = {}
@@ -724,8 +771,16 @@ if st.session_state.get("prestanda"):
             st.write(
                 f"Källhämtning eller cacheläsning: **{prestanda['rss_sekunder']:.2f} sekunder**"
             )
-        if "ai_sekunder" in prestanda:
-            st.write(f"Briefinggenerering eller cacheläsning: **{prestanda['ai_sekunder']:.2f} sekunder**")
+        if "nyheter_ai_sekunder" in prestanda:
+            st.write(
+                "Nyhetsgenerering eller cacheläsning: "
+                f"**{prestanda['nyheter_ai_sekunder']:.2f} sekunder**"
+            )
+        if "redaktionellt_ai_sekunder" in prestanda:
+            st.write(
+                "Böcker och morgontanke eller cacheläsning: "
+                f"**{prestanda['redaktionellt_ai_sekunder']:.2f} sekunder**"
+            )
         if "fordjupning_sekunder" in prestanda:
             st.write(f"Senaste fördjupning: **{prestanda['fordjupning_sekunder']:.2f} sekunder**")
         if "fraga_sekunder" in prestanda:
@@ -738,23 +793,6 @@ if st.session_state.get("prestanda"):
 # Visa briefing om den finns i minnet
 if 'briefing' in st.session_state:
     st.markdown("---")
-    if st.button("Skapa en ny version av briefingen"):
-        st.session_state["briefing_variant"] += 1
-        with st.spinner("Skapar en ny version..."):
-            starttid = time.perf_counter()
-            try:
-                briefing = generera_briefing(
-                    st.session_state["rådata"],
-                    st.session_state["briefing_variant"],
-                )
-                st.session_state["prestanda"]["ai_sekunder"] = time.perf_counter() - starttid
-                st.session_state["prestanda"]["utdataord"] = len(briefing.split())
-                st.session_state["briefing"] = briefing
-                st.session_state["fordjupningar"] = {}
-            except Exception:
-                st.session_state["briefing_variant"] -= 1
-                st.error("En ny version kunde inte skapas. Den tidigare briefingen finns kvar.")
-
     visa_briefing(
         st.session_state['briefing'],
         st.session_state.get("artiklar", []),
@@ -807,4 +845,4 @@ if 'briefing' in st.session_state:
                 except Exception:
                     st.error("Assistenten kunde inte svara just nu. Försök igen senare.")
 else:
-    st.write("Börja med att uppdatera källorna och skapa sedan morgonbriefingen.")
+    st.write("Börja med att hämta den aktuella nyhetsutgåvan och skapa sedan morgonbriefingen.")
