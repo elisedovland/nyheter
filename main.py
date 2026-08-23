@@ -745,7 +745,8 @@ else:
 nyhetsnyckel = nyhetsstart.strftime("%Y-%m-%d-%H")
 redaktionell_nyckel = nu.date().isoformat()
 nasta_redaktionella_dag = (nu + timedelta(days=1)).date()
-utgavedatum = f"{svenska_veckodagar[nu.weekday()]} {nu.day} {svenska_manader[nu.month - 1]} {nu.year} · Morgonutgåvan"
+utgavetyp = "Morgonutgåvan" if nu.hour < 12 else "Eftermiddagsutgåvan"
+utgavedatum = f"{svenska_veckodagar[nu.weekday()]} {nu.day} {svenska_manader[nu.month - 1]} {nu.year} · {utgavetyp}"
 utgavetider = f"Böcker och morgontanke: nästa {nasta_redaktionella_dag:%d/%m kl. 00:00}"
 
 st.markdown(f"""
