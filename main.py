@@ -232,9 +232,9 @@ st.markdown("""
         border-radius: 50% !important;
         background: radial-gradient(
             circle at center,
-            #F3E8B9 0%,
-            #E7D79B 52%,
-            #CDBB78 100%
+            #FAF4D9 0%,
+            #F0E4B8 52%,
+            #DDCB8D 100%
         ) !important;
         box-shadow: inset 0 0 18px rgba(117, 107, 92, 0.08) !important;
         font-family: Georgia, serif !important;
@@ -247,9 +247,9 @@ st.markdown("""
     .st-key-starta_utgava .stButton>button:hover {
         background: radial-gradient(
             circle at center,
-            #F5EBC2 0%,
-            #E9DAA0 52%,
-            #D1C081 100%
+            #FCF7E1 0%,
+            #F3E8C1 52%,
+            #E2D197 100%
         ) !important;
     }
     .st-key-starta_utgava .stButton>button p {
@@ -265,7 +265,7 @@ st.markdown("""
         width: 190px;
         height: 52px;
         margin: -24px auto 12px;
-        color: #7F8A68;
+        color: #6F8655;
     }
     .button-vine svg {
         display: block;
