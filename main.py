@@ -20,22 +20,56 @@ st.markdown("""
     }
     .header-box {
         text-align: center;
-        border-bottom: 2px solid #D6D0C2;
-        padding-bottom: 25px;
+        border-top: 1px solid #8F8778;
+        border-bottom: 3px double #8F8778;
+        padding: 18px 0 22px;
         margin-bottom: 35px;
+    }
+    .masthead {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
     }
     .header-title {
         font-family: Georgia, serif !important;
-        font-size: 28px !important;
+        font-size: 32px !important;
         color: #1A1918 !important;
         margin: 0 !important;
-        letter-spacing: 1.5px !important;
+        letter-spacing: 2.5px !important;
         font-weight: 700 !important;
+        line-height: 1.2 !important;
+        text-align: center !important;
+    }
+    .sun-symbol {
+        width: 38px;
+        height: 38px;
+        flex: 0 0 38px;
+        color: #756B5C;
+    }
+    .sun-symbol.right {
+        transform: scaleX(-1);
+    }
+    @media (max-width: 480px) {
+        .masthead {
+            gap: 10px;
+        }
+        .header-title {
+            font-size: 25px !important;
+            letter-spacing: 1.5px !important;
+        }
+        .sun-symbol {
+            width: 29px;
+            height: 29px;
+            flex-basis: 29px;
+        }
     }
     .header-subtitle {
         font-size: 18px !important;
         color: #5C564F !important;
-        margin-top: 10px !important;
+        margin-top: 8px !important;
+        letter-spacing: 0.8px !important;
+        text-align: center !important;
     }
     p, li, label, div {
         font-family: "Atkinson Hyperlegible", Verdana, -apple-system, sans-serif !important;
@@ -186,8 +220,22 @@ def generera_briefing(rådata):
 # --- 2. HUVUDGRÄNSSNITT ---
 st.markdown("""
     <div class="header-box">
-        <div class="header-title">☕ MORGONPOSTEN</div>
-        <div class="header-subtitle">🌱 Lugn AI-briefing & Litteratur i din egen takt 🌿</div>
+        <div class="masthead">
+            <svg class="sun-symbol" aria-hidden="true" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="24" cy="24" r="7.5" stroke="currentColor" stroke-width="1.6"/>
+                <circle cx="24" cy="24" r="3.5" fill="currentColor"/>
+                <path d="M24 3v9M24 36v9M3 24h9M36 24h9M9.15 9.15l6.36 6.36M32.49 32.49l6.36 6.36M38.85 9.15l-6.36 6.36M15.51 32.49l-6.36 6.36" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M17.2 5.1l2.4 7.4M28.4 35.5l2.4 7.4M5.1 30.8l7.4-2.4M35.5 19.6l7.4-2.4M5.1 17.2l7.4 2.4M35.5 28.4l7.4 2.4M17.2 42.9l2.4-7.4M28.4 12.5l2.4-7.4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+            </svg>
+            <div class="header-title">MORGONPOSTEN</div>
+            <svg class="sun-symbol right" aria-hidden="true" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <circle cx="24" cy="24" r="7.5" stroke="currentColor" stroke-width="1.6"/>
+                <circle cx="24" cy="24" r="3.5" fill="currentColor"/>
+                <path d="M24 3v9M24 36v9M3 24h9M36 24h9M9.15 9.15l6.36 6.36M32.49 32.49l6.36 6.36M38.85 9.15l-6.36 6.36M15.51 32.49l-6.36 6.36" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M17.2 5.1l2.4 7.4M28.4 35.5l2.4 7.4M5.1 30.8l7.4-2.4M35.5 19.6l7.4-2.4M5.1 17.2l7.4 2.4M35.5 28.4l7.4 2.4M17.2 42.9l2.4-7.4M28.4 12.5l2.4-7.4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+            </svg>
+        </div>
+        <div class="header-subtitle">Lugn AI-briefing &amp; litteratur i din egen takt</div>
     </div>
 """, unsafe_allow_html=True)
 
