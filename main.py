@@ -111,6 +111,67 @@ st.markdown("""
         margin-top: 5px !important;
         text-align: center !important;
     }
+    .bookplate {
+        max-width: 360px;
+        margin: 22px auto 28px !important;
+        padding: 22px 24px 18px;
+        border: 3px double #8F8778;
+        background: #F2ECDD;
+        box-shadow: inset 0 0 0 5px #F2ECDD, inset 0 0 0 6px #C4BCA8;
+        text-align: center !important;
+    }
+    .bookplate-kicker,
+    .bookplate-title,
+    .bookplate-author,
+    .bookplate-year,
+    .bookplate-genre,
+    .bookplate-signature {
+        font-family: Georgia, serif !important;
+        text-align: center !important;
+        line-height: 1.35 !important;
+    }
+    .bookplate-kicker {
+        font-size: 12px !important;
+        letter-spacing: 2px !important;
+        color: #756B5C !important;
+    }
+    .bookplate-symbol {
+        width: 54px;
+        height: 54px;
+        margin: 12px auto 10px;
+        color: #756B5C;
+    }
+    .bookplate-title {
+        font-size: 23px !important;
+        letter-spacing: 1.2px !important;
+        font-weight: 700 !important;
+        color: #1A1918 !important;
+        text-transform: uppercase;
+    }
+    .bookplate-author {
+        font-size: 17px !important;
+        margin-top: 6px !important;
+        color: #2C2A29 !important;
+    }
+    .bookplate-year {
+        font-size: 14px !important;
+        color: #756B5C !important;
+    }
+    .bookplate-genre {
+        border-top: 1px solid #C4BCA8;
+        border-bottom: 1px solid #C4BCA8;
+        font-size: 12px !important;
+        letter-spacing: 1.4px !important;
+        margin: 14px 18px 12px !important;
+        padding: 5px 0 !important;
+        color: #5C564F !important;
+        text-transform: uppercase;
+    }
+    .bookplate-signature {
+        font-size: 11px !important;
+        letter-spacing: 2.5px !important;
+        color: #756B5C !important;
+    }
     p, li, label, div {
         font-family: "Atkinson Hyperlegible", Verdana, -apple-system, sans-serif !important;
         font-size: 20px !important;
@@ -376,6 +437,54 @@ def svara_pa_fraga(fraga, avsnitt, kallunderlag):
     return model.generate_content(prompt).text
 
 
+def genre_symbol(genre):
+    genre_liten = genre.casefold()
+    symboler = [
+        (("myster", "deckar", "krim", "thriller"), '<circle cx="21" cy="21" r="10"/><path d="m29 29 12 12"/>'),
+        (("histor",), '<path d="M14 8h20M14 40h20M17 12h14l-3 8-4 4-4-4-3-8Zm0 24h14l-3-8-4-4-4 4-3 8Z"/>'),
+        (("science fiction", "sci-fi", "dystop"), '<circle cx="24" cy="24" r="4"/><ellipse cx="24" cy="24" rx="19" ry="8"/><ellipse cx="24" cy="24" rx="8" ry="19" transform="rotate(35 24 24)"/>'),
+        (("fantasy", "fantasi"), '<path d="M30 7a17 17 0 1 0 11 27A15 15 0 1 1 30 7Z"/><path d="m36 10 1.5 3.5L41 15l-3.5 1.5L36 20l-1.5-3.5L31 15l3.5-1.5L36 10Z"/>'),
+        (("romantik", "romance", "kärlek"), '<path d="M24 40V20M24 24c-9-2-11-9-8-14 7 1 10 6 8 14Zm0 4c9-2 11-9 8-14-7 1-10 6-8 14ZM19 34l-6 5M29 34l6 5"/>'),
+        (("äventyr", "adventure", "reseskild"), '<circle cx="24" cy="24" r="18"/><circle cx="24" cy="24" r="3"/><path d="m29 19 6-6-4 10-7 1 5-5ZM19 29l-6 6 4-10 7-1-5 5Z"/>'),
+        (("gotik", "gothic", "skräck", "horror"), '<path d="M19 40h10M21 40V24h6v16M24 24c-5-5 0-8 1-14 6 6 5 11-1 14ZM17 18h14M18 21h12"/>'),
+        (("filosofi", "essä", "essay"), '<path d="M14 34h20M17 34v6h14v-6M19 31h10l3-8H16l3 8ZM24 23V10M20 14h8M18 10h12"/>'),
+    ]
+    innehall = '<path d="M8 13c7-2 12 0 16 4v24c-4-4-9-6-16-4V13Zm32 0c-7-2-12 0-16 4v24c4-4 9-6 16-4V13Z"/>'
+    for nyckelord, kandidat in symboler:
+        if any(ordet in genre_liten for ordet in nyckelord):
+            innehall = kandidat
+            break
+    return (
+        '<svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" '
+        'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" '
+        f'stroke-linejoin="round" aria-hidden="true">{innehall}</svg>'
+    )
+
+
+def skapa_bokplatta(innehall, sektion_nummer):
+    ren_text = re.sub(r"[*_`]", "", innehall)
+    falt = {}
+    for namn in ("Titel", "Författare", "Utgivningsår", "Genre"):
+        traff = re.search(rf"(?im)^\s*{namn}:\s*(.+?)\s*$", ren_text)
+        if traff:
+            falt[namn] = traff.group(1).strip()
+    if not all(namn in falt for namn in ("Titel", "Författare", "Genre")):
+        return ""
+
+    kicker = "DAGENS KLASSIKER" if sektion_nummer == 8 else "DAGENS NYA BOK"
+    return f"""
+    <div class="bookplate">
+        <div class="bookplate-kicker">{kicker}</div>
+        <div class="bookplate-symbol" aria-hidden="true">{genre_symbol(falt['Genre'])}</div>
+        <div class="bookplate-title">{html.escape(falt['Titel'])}</div>
+        <div class="bookplate-author">{html.escape(falt['Författare'])}</div>
+        <div class="bookplate-year">{html.escape(falt.get('Utgivningsår', ''))}</div>
+        <div class="bookplate-genre">{html.escape(falt['Genre'])}</div>
+        <div class="bookplate-signature">MORGONPOSTEN</div>
+    </div>
+    """
+
+
 def visa_briefing(briefing, artiklar):
     sektioner = dela_upp_briefing(briefing)
     if not sektioner:
@@ -404,6 +513,10 @@ def visa_briefing(briefing, artiklar):
         st.markdown(f"**Kort sagt:** {sammanfattning}")
         with st.expander("Läs det korta avsnittet"):
             st.markdown(innehall)
+        if nummer in (8, 9):
+            bokplatta = skapa_bokplatta(innehall, nummer)
+            if bokplatta:
+                st.markdown(bokplatta, unsafe_allow_html=True)
         if nummer < 10:
             if st.button("Skapa fördjupning", key=f"fordjupa_{nummer}"):
                 kallunderlag = valj_kallunderlag(innehall, artiklar) if nummer <= 7 else ""
@@ -490,11 +603,23 @@ def generera_briefing(rådata, variant=0):
 
     ### 📚 8. DAGENS KLASSIKER
     **Kort sagt:** Presentera boken i en kort mening.
-    En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar.
+    En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken.
+    Skriv metadata på fyra egna rader i exakt detta format:
+    Titel: bokens titel
+    Författare: författarens namn
+    Utgivningsår: årtal
+    Genre: tydlig genre
+    Skriv därefter en blurb på 2-3 meningar.
 
     ### 📖 9. DAGENS NYA BOKREKOMMENDATION
     **Kort sagt:** Presentera boken i en kort mening.
-    En nyligen utgiven bok. Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar.
+    En nyligen utgiven bok. Inga parenteser i rubriken.
+    Skriv metadata på fyra egna rader i exakt detta format:
+    Titel: bokens titel
+    Författare: författarens namn
+    Utgivningsår: årtal
+    Genre: tydlig genre
+    Skriv därefter en blurb på 2-3 meningar.
 
     ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
     **Kort sagt:** Ge en kort inledning utan att avslöja hela poängen.
