@@ -185,7 +185,9 @@ if api_key:
 else:
     model = None
 
+@st.cache_data(ttl=900, show_spinner=False)
 def hamta_kallmaterial():
+    """Hämta RSS-underlag och återanvänd resultatet i högst 15 minuter."""
     kallor = {
         "SVT Nyheter": "https://www.svt.se/nyheter/rss.xml",
         "BBC World": "http://feeds.bbci.co.uk/news/world/rss.xml",
@@ -243,6 +245,7 @@ def hamta_kallmaterial():
 def visa_kallstatus(kallstatus):
     fungerande = sum(status["ok"] for status in kallstatus)
     st.caption(f"Källor: {fungerande} av {len(kallstatus)} uppdaterades.")
+    st.caption("RSS-underlaget återanvänds i upp till 15 minuter för snabbare laddning.")
     with st.expander("Visa källstatus", expanded=fungerande == 0):
         for status in kallstatus:
             markering = "✓" if status["ok"] else "–"
