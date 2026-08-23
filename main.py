@@ -1,5 +1,8 @@
+import html
 import os
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
@@ -185,61 +188,107 @@ if api_key:
 else:
     model = None
 
+KALLOR = {
+    "SVT Nyheter": "https://www.svt.se/nyheter/rss.xml",
+    "BBC World": "http://feeds.bbci.co.uk/news/world/rss.xml",
+    "Deutsche Welle": "https://rss.dw.com/rdf/rss-en-all",
+    "UN News": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
+    "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
+    "AllAfrica Global": "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
+    "The Hindu (Indien)": "https://www.thehindu.com/news/international/feeder/default.rss",
+}
+
+
+def rensa_rss_text(text, max_langd=900):
+    text = re.sub(r"<[^>]+>", " ", str(text or ""))
+    text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= max_langd:
+        return text
+    return f"{text[:max_langd].rsplit(' ', 1)[0]}…"
+
+
+def hamta_en_kalla(kalla):
+    namn, url = kalla
+    try:
+        request = Request(url, headers={"User-Agent": "Morgonposten/1.0"})
+        with urlopen(request, timeout=12) as response:
+            feed = feedparser.parse(response.read())
+
+        if getattr(feed, "bozo", False) and not feed.entries:
+            raise ValueError("RSS-flödet kunde inte tolkas")
+        if not feed.entries:
+            raise ValueError("RSS-flödet innehöll inga artiklar")
+
+        artiklar = []
+        for entry in feed.entries[:3]:
+            lank = str(getattr(entry, "link", "")).strip()
+            rubrik = rensa_rss_text(getattr(entry, "title", "Rubrik saknas"), 220)
+            sammanfattning = rensa_rss_text(getattr(entry, "summary", ""))
+            bild_url = ""
+            if hasattr(entry, "media_thumbnail") and entry.media_thumbnail:
+                bild_url = entry.media_thumbnail[0].get("url", "")
+            elif hasattr(entry, "enclosures") and entry.enclosures:
+                for enclosure in entry.enclosures:
+                    if enclosure.get("type", "").startswith("image/"):
+                        bild_url = enclosure.get("href", "")
+                        break
+            artiklar.append(
+                {
+                    "rubrik": rubrik,
+                    "sammanfattning": sammanfattning,
+                    "lank": lank,
+                    "bild": bild_url,
+                    "kalla": namn,
+                }
+            )
+        return namn, artiklar, None
+    except Exception as error:
+        return namn, [], str(error) or "Okänt fel"
+
+
 @st.cache_data(ttl=900, show_spinner=False)
 def hamta_kallmaterial():
-    """Hämta RSS-underlag och återanvänd resultatet i högst 15 minuter."""
-    kallor = {
-        "SVT Nyheter": "https://www.svt.se/nyheter/rss.xml",
-        "BBC World": "http://feeds.bbci.co.uk/news/world/rss.xml",
-        "Deutsche Welle": "https://rss.dw.com/rdf/rss-en-all",
-        "UN News": "https://news.un.org/feed/subscribe/en/news/all/rss.xml",
-        "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
-        "AllAfrica Global": "https://allafrica.com/tools/headlines/rdf/latest/headlines.rdf",
-        "The Hindu (Indien)": "https://www.thehindu.com/news/international/feeder/default.rss"
-    }
+    """Hämta, rensa och återanvänd RSS-underlag i högst 15 minuter."""
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        resultat = list(executor.map(hamta_en_kalla, KALLOR.items()))
 
-    samlad_data = ""
+    artiklar = []
     kallstatus = []
-    artikelnummer = 1
-    for namn, url in kallor.items():
-        try:
-            request = Request(url, headers={"User-Agent": "Morgonposten/1.0"})
-            with urlopen(request, timeout=12) as response:
-                feed = feedparser.parse(response.read())
+    sedda_artiklar = set()
+    for namn, kallartiklar, fel in resultat:
+        if fel:
+            kallstatus.append({"namn": namn, "ok": False, "meddelande": fel})
+            continue
 
-            if getattr(feed, "bozo", False) and not feed.entries:
-                raise ValueError("RSS-flödet kunde inte tolkas")
-            if not feed.entries:
-                raise ValueError("RSS-flödet innehöll inga artiklar")
+        tillagda = 0
+        for artikel in kallartiklar:
+            identitet = artikel["lank"] or artikel["rubrik"].casefold()
+            if identitet in sedda_artiklar:
+                continue
+            sedda_artiklar.add(identitet)
+            artikel["id"] = f"A{len(artiklar) + 1}"
+            artiklar.append(artikel)
+            tillagda += 1
+        kallstatus.append(
+            {"namn": namn, "ok": True, "meddelande": f"{tillagda} artiklar"}
+        )
 
-            samlad_data += f"\n--- KÄLLSEKTION: {namn} ---\n"
-            for entry in feed.entries[:3]:
-                lank = getattr(entry, 'link', 'Länk saknas')
-                bild_url = "Ingen bild tillgänglig"
-                if hasattr(entry, 'media_thumbnail') and entry.media_thumbnail:
-                    bild_url = entry.media_thumbnail[0]['url']
-                elif hasattr(entry, 'enclosures') and entry.enclosures:
-                    for me in entry.enclosures:
-                        if me.get('type', '').startswith('image/'):
-                            bild_url = me.get('href', bild_url)
-                            break
-
-                samlad_data += (
-                    f"ARTIKEL-ID: A{artikelnummer}\n"
-                    f"Rubrik: {entry.title}\n"
-                    f"Info: {getattr(entry, 'summary', '')}\n"
-                    f"Länk: {lank}\n"
-                    f"Bild: {bild_url}\n"
-                    f"Källa: {namn}\n\n"
-                )
-                artikelnummer += 1
-            kallstatus.append({"namn": namn, "ok": True, "meddelande": "Uppdaterad"})
-        except Exception as error:
-            kallstatus.append(
-                {"namn": namn, "ok": False, "meddelande": str(error) or "Okänt fel"}
+    block = []
+    for artikel in artiklar:
+        block.append(
+            "\n".join(
+                [
+                    f"ARTIKEL-ID: {artikel['id']}",
+                    f"Rubrik: {artikel['rubrik']}",
+                    f"Info: {artikel['sammanfattning']}",
+                    f"Länk: {artikel['lank']}",
+                    f"Bild: {artikel['bild'] or 'Ingen bild tillgänglig'}",
+                    f"Källa: {artikel['kalla']}",
+                ]
             )
-
-    return samlad_data, kallstatus
+        )
+    return "\n\n".join(block), kallstatus, artiklar
 
 
 def visa_kallstatus(kallstatus):
@@ -250,6 +299,20 @@ def visa_kallstatus(kallstatus):
         for status in kallstatus:
             markering = "✓" if status["ok"] else "–"
             st.write(f"{markering} **{status['namn']}** — {status['meddelande']}")
+
+
+SEKTIONER = [
+    (1, "🇸🇪 1. SVERIGE & VALET"),
+    (2, "🇳🇴 2. NORDEN"),
+    (3, "🏛️ 3. GLOBALT – GEOPOLITIK"),
+    (4, "⚖️ 4. GLOBALT – MÄNSKLIGA RÄTTIGHETER"),
+    (5, "📈 5. GLOBALT – SAMHÄLLE & EKONOMI"),
+    (6, "🤖 6. TEKNIK & AI"),
+    (7, "🔬 7. VETENSKAP & HÄLSA"),
+    (8, "📚 8. DAGENS KLASSIKER"),
+    (9, "📖 9. DAGENS NYA BOKREKOMMENDATION"),
+    (10, "☀️ 10. MORGONENS TANKE ELLER SKÄMT"),
+]
 
 
 def dela_upp_briefing(briefing):
@@ -270,19 +333,118 @@ def dela_upp_briefing(briefing):
     return sektioner
 
 
-def visa_briefing(briefing):
+def valj_kallunderlag(text, artiklar):
+    artikel_idn = set(re.findall(r"\bA\d+\b", text))
+    relevanta = [artikel for artikel in artiklar if artikel["id"] in artikel_idn]
+    return "\n\n".join(
+        (
+            f"ARTIKEL-ID: {artikel['id']}\n"
+            f"Rubrik: {artikel['rubrik']}\n"
+            f"Info: {artikel['sammanfattning']}\n"
+            f"Länk: {artikel['lank']}\n"
+            f"Källa: {artikel['kalla']}"
+        )
+        for artikel in relevanta
+    )
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def generera_fordjupning(rubrik, avsnitt, kallunderlag):
+    if not model:
+        return "API-nyckel saknas för att skapa en fördjupning."
+
+    prompt = f"""
+    Skriv en lugn och pedagogisk svensk fördjupning på 300-450 ord om avsnittet "{rubrik}".
+    Utgå från den korta texten och, för nyheter, endast från källunderlaget nedan.
+    Lägg inte till aktuella fakta från egen kunskap. Skilj fakta från analys, och kopiera varje
+    använd källas namn och länk exakt. Om underlaget inte räcker ska du säga det tydligt.
+
+    KORT TEXT:
+    {avsnitt}
+
+    KÄLLUNDERLAG:
+    {kallunderlag or 'Redaktionellt avsnitt utan RSS-underlag.'}
+    """
+    return model.generate_content(prompt).text
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def svara_pa_fraga(fraga, avsnitt, kallunderlag):
+    if not model:
+        return "API-nyckel saknas för att använda assistenten."
+
+    prompt = f"""
+    Du är en tålmodig och pedagogisk AI-assistent för en gymnasieelev med nystagmus och migrän.
+    Svara lugnt, tydligt och kortfattat på svenska. För aktuella nyheter får du endast använda
+    det valda avsnittet och källunderlaget nedan. Ange källnamn och kopiera länken exakt när du
+    beskriver en nyhetsuppgift. Om frågan inte kan besvaras från materialet ska du säga det.
+    Använd inte egen kunskap för aktuella nyhetspåståenden och hitta aldrig på en källa eller länk.
+
+    VALT AVSNITT:
+    {avsnitt}
+
+    RELEVANT KÄLLUNDERLAG:
+    {kallunderlag or 'Inget RSS-underlag är kopplat till det valda avsnittet.'}
+
+    FRÅGA:
+    {fraga}
+    """
+    return model.generate_content(prompt).text
+
+
+def visa_briefing(briefing, artiklar):
     sektioner = dela_upp_briefing(briefing)
     if not sektioner:
         st.markdown(briefing)
         return
 
+    sektioner_per_nummer = {}
     for rubrik, sammanfattning, innehall in sektioner:
+        nummer = re.search(r"\b(10|[1-9])\.", rubrik)
+        if nummer:
+            sektioner_per_nummer[int(nummer.group(1))] = (rubrik, sammanfattning, innehall)
+
+    st.session_state.setdefault("fordjupningar", {})
+    for nummer, standardrubrik in SEKTIONER:
+        sektion = sektioner_per_nummer.get(nummer)
+        if not sektion:
+            st.markdown(f"### {standardrubrik}")
+            if nummer <= 7:
+                st.info("Inget tillräckligt säkert underlag hittades för detta avsnitt idag.")
+            else:
+                st.info("Det redaktionella avsnittet kunde inte skapas den här gången.")
+            continue
+
+        rubrik, sammanfattning, innehall = sektion
         st.markdown(f"### {rubrik}")
         st.markdown(f"**Kort sagt:** {sammanfattning}")
-        with st.expander("Läs hela avsnittet"):
+        with st.expander("Läs det korta avsnittet"):
             st.markdown(innehall)
+        if nummer < 10:
+            if st.button("Skapa fördjupning", key=f"fordjupa_{nummer}"):
+                kallunderlag = valj_kallunderlag(innehall, artiklar) if nummer <= 7 else ""
+                with st.spinner("Skapar en fördjupning..."):
+                    starttid = time.perf_counter()
+                    try:
+                        st.session_state["fordjupningar"][nummer] = generera_fordjupning(
+                            rubrik,
+                            f"{sammanfattning}\n\n{innehall}",
+                            kallunderlag,
+                        )
+                        st.session_state["prestanda"]["fordjupning_sekunder"] = (
+                            time.perf_counter() - starttid
+                        )
+                    except Exception:
+                        st.error("Fördjupningen kunde inte skapas just nu. Försök igen senare.")
+            if nummer in st.session_state["fordjupningar"]:
+                with st.expander("Fördjupning", expanded=True):
+                    st.markdown(st.session_state["fordjupningar"][nummer])
 
-def generera_briefing(rådata):
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def generera_briefing(rådata, variant=0):
+    """Skapa en kort briefing och återanvänd den när underlaget är oförändrat."""
+    _ = variant
     if not model:
         return "⚠️ API-nyckel saknas. Lägg till din GEMINI_API_KEY under 'Secrets' i Streamlit Cloud."
 
@@ -299,52 +461,55 @@ def generera_briefing(rådata):
     - Varje nyhetsartikel måste avslutas med exakt artikel-ID, källnamn och den länk som hör till artikeln i underlaget.
     - Kopiera länken exakt. Skapa eller gissa aldrig en länk eller bildlänk.
     - Skilj tydligt mellan verifierade uppgifter och analys. Inled analys med "Analys:".
+    - Utelämna helt en nyhetssektion (1-7) om det inte finns en relevant artikel i underlaget.
+      Appen visar då automatiskt att säkert underlag saknas. Skriv inte utfyllnad om frånvaron.
     - Bokrekommendationerna och morgonens tanke är redaktionellt material och omfattas inte av kravet på RSS-källa.
 
-    Skapa en morgonbriefing på SVENSKA med exakt följande rubrikstruktur:
+    Skapa en koncentrerad morgonbriefing på SVENSKA. Hela svaret ska vara ungefär 700-1 000 ord.
+    Använd följande rubriker för de sektioner som har underlag:
 
     ### 🇸🇪 1. SVERIGE & VALET
     *Inrikespolitik, lagförslag och riksdagsbeslut*
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
-    (250-400 ord)
+    (80-120 ord)
 
     ### 🇳🇴 2. NORDEN
     *Samhälle och utveckling i grannländerna*
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
-    (250-400 ord)
+    (80-120 ord)
 
     ### 🏛️ 3. GLOBALT – GEOPOLITIK
     *Internationell politik och djupanalys*
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
-    (350-500 ord)
+    (100-140 ord)
 
     ### ⚖️ 4. GLOBALT – MÄNSKLIGA RÄTTIGHETER
     *Internationella relationer, FN och EU*
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
-    (250-400 ord)
+    (80-120 ord)
 
     ### 📈 5. GLOBALT – SAMHÄLLE & EKONOMI
     *Demografi och global utveckling*
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
-    (250-400 ord)
+    (80-120 ord)
 
     ### 🤖 6. TEKNIK & AI
     *Tekniska genombrott och ny lagstiftning*
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
-    (150-250 ord)
+    (70-100 ord)
 
     ### 🔬 7. VETENSKAP & HÄLSA
     *Medicinska och miljömässiga upptäckter*
     **Kort sagt:** Sammanfatta avsnittet i 1-2 korta meningar.
-    (150-250 ord)
+    (70-100 ord)
 
     ### 📚 8. DAGENS KLASSIKER
     **Kort sagt:** Presentera boken i en kort mening.
-    En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken. Titel, författare, utgivningsår, genre, blurb (3-4 meningar) och bildlänk till omslaget.
+    En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar samt bildlänk till omslaget.
 
     ### 📖 9. DAGENS NYA BOKREKOMMENDATION
     **Kort sagt:** Presentera boken i en kort mening.
-    En nyligen utgiven bok. Inga parenteser i rubriken. Titel, författare, utgivningsår, genre, blurb (3-4 meningar) och bildlänk till omslaget.
+    En nyligen utgiven bok. Inga parenteser i rubriken. Titel, författare, utgivningsår, genre och en blurb på 2-3 meningar samt bildlänk till omslaget.
 
     ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
     **Kort sagt:** Ge en kort inledning utan att avslöja hela poängen.
@@ -392,33 +557,114 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 
-if st.button("☕ Hämta morgonens nyheter"):
-    with st.spinner("Hämtar dagens nyheter i lugn och ro..."):
-        nyhetsdata, kallstatus = hamta_kallmaterial()
-        st.session_state['kallstatus'] = kallstatus
-        st.session_state['rådata'] = nyhetsdata
-        if nyhetsdata:
-            st.session_state['briefing'] = generera_briefing(nyhetsdata)
-        else:
-            st.session_state.pop('briefing', None)
-            st.error("Inga nyhetskällor kunde hämtas. Försök igen om en stund.")
+st.session_state.setdefault("prestanda", {})
+st.session_state.setdefault("briefing_variant", 0)
+
+knappkolumn_1, knappkolumn_2 = st.columns(2)
+with knappkolumn_1:
+    uppdatera_kallor = st.button("1. Uppdatera källor", use_container_width=True)
+with knappkolumn_2:
+    skapa_briefing = st.button(
+        "2. Skapa morgonbriefing",
+        disabled=not bool(st.session_state.get("rådata")),
+        use_container_width=True,
+    )
+
+if uppdatera_kallor:
+    with st.spinner("Hämtar dagens källor i lugn och ro..."):
+        starttid = time.perf_counter()
+        nyhetsdata, kallstatus, artiklar = hamta_kallmaterial()
+        st.session_state["prestanda"]["rss_sekunder"] = time.perf_counter() - starttid
+        st.session_state["prestanda"]["antal_artiklar"] = len(artiklar)
+        st.session_state["prestanda"]["indatatecken"] = len(nyhetsdata)
+        st.session_state["kallstatus"] = kallstatus
+        st.session_state["artiklar"] = artiklar
+        if nyhetsdata != st.session_state.get("rådata"):
+            st.session_state.pop("briefing", None)
+            st.session_state["fordjupningar"] = {}
+            st.session_state["briefing_variant"] = 0
+        st.session_state["rådata"] = nyhetsdata
+        st.session_state["kallfel"] = not bool(nyhetsdata)
+    st.rerun()
+
+if skapa_briefing:
+    with st.spinner("Skapar en kort morgonbriefing..."):
+        starttid = time.perf_counter()
+        try:
+            briefing = generera_briefing(
+                st.session_state["rådata"],
+                st.session_state["briefing_variant"],
+            )
+            st.session_state["prestanda"]["ai_sekunder"] = time.perf_counter() - starttid
+            st.session_state["prestanda"]["utdataord"] = len(briefing.split())
+            st.session_state["briefing"] = briefing
+            st.session_state["fordjupningar"] = {}
+        except Exception:
+            st.error("Briefingen kunde inte skapas just nu. Källorna är sparade, så du kan försöka igen.")
+
+if st.session_state.get("kallfel"):
+    st.error("Inga nyhetskällor kunde hämtas. Försök igen om en stund.")
 
 if 'kallstatus' in st.session_state:
     visa_kallstatus(st.session_state['kallstatus'])
 
+if st.session_state.get("prestanda"):
+    with st.expander("Prestanda och resursanvändning"):
+        prestanda = st.session_state["prestanda"]
+        if "rss_sekunder" in prestanda:
+            st.write(
+                f"Källhämtning eller cacheläsning: **{prestanda['rss_sekunder']:.2f} sekunder**"
+            )
+        if "ai_sekunder" in prestanda:
+            st.write(f"Briefinggenerering eller cacheläsning: **{prestanda['ai_sekunder']:.2f} sekunder**")
+        if "fordjupning_sekunder" in prestanda:
+            st.write(f"Senaste fördjupning: **{prestanda['fordjupning_sekunder']:.2f} sekunder**")
+        if "fraga_sekunder" in prestanda:
+            st.write(f"Senaste assistentsvar: **{prestanda['fraga_sekunder']:.2f} sekunder**")
+        st.write(f"Artiklar i underlaget: **{prestanda.get('antal_artiklar', 0)}**")
+        st.write(f"Rensad indatamängd: **{prestanda.get('indatatecken', 0):,} tecken**")
+        if "utdataord" in prestanda:
+            st.write(f"Briefingens längd: **{prestanda['utdataord']:,} ord**")
+
 # Visa briefing om den finns i minnet
 if 'briefing' in st.session_state:
     st.markdown("---")
-    visa_briefing(st.session_state['briefing'])
+    if st.button("Skapa en ny version av briefingen"):
+        st.session_state["briefing_variant"] += 1
+        with st.spinner("Skapar en ny version..."):
+            starttid = time.perf_counter()
+            try:
+                briefing = generera_briefing(
+                    st.session_state["rådata"],
+                    st.session_state["briefing_variant"],
+                )
+                st.session_state["prestanda"]["ai_sekunder"] = time.perf_counter() - starttid
+                st.session_state["prestanda"]["utdataord"] = len(briefing.split())
+                st.session_state["briefing"] = briefing
+                st.session_state["fordjupningar"] = {}
+            except Exception:
+                st.session_state["briefing_variant"] -= 1
+                st.error("En ny version kunde inte skapas. Den tidigare briefingen finns kvar.")
+
+    visa_briefing(
+        st.session_state['briefing'],
+        st.session_state.get("artiklar", []),
+    )
 
     # Interaktiv AI-chatt för begrepp, utökning och specifika nyheter
     st.markdown("---")
     st.subheader("💬 AI-assistent för dina frågor")
-    st.write("Här kan du ställa frågor om ett svårt ord, be om att få en specifik nyhet expanderad, eller fråga efter andra nyheter och uppdateringar!")
+    st.write("Välj ett avsnitt så skickas bara den relevanta texten och dess källor till assistenten.")
+
+    tillgangliga_sektioner = dela_upp_briefing(st.session_state["briefing"])
+    sektionsalternativ = ["Briefingens korta sammanfattningar"] + [
+        rubrik for rubrik, _, _ in tillgangliga_sektioner
+    ]
 
     with st.form("fraga_till_assistenten", clear_on_submit=True):
+        vald_sektion = st.selectbox("Frågan gäller", sektionsalternativ)
         användar_fråga = st.text_area(
-            "Vad funderar du på? (t.ex. 'Förklara ordet ratificera', 'Expandera nyhet 3' eller 'Berätta mer om valet i USA'):",
+            "Vad funderar du på?",
             height=140,
             placeholder="Skriv din fråga här. Du kan skriva på flera rader.",
         )
@@ -429,23 +675,27 @@ if 'briefing' in st.session_state:
             st.error("⚠️ API-nyckel saknas för att använda chatten.")
         else:
             with st.spinner("AI-assistenten funderar..."):
-                prompt_fråga = f"""
-                Du är en tålmodig och pedagogisk AI-assistent för en gymnasieelev (samhällsklass) med nystagmus och migrän.
-                
-                Här är dagens rådata som nyheterna byggdes på:
-                {st.session_state.get('rådata', 'Ingen rådata tillgänglig')}
-
-                Här är den tidigare genererade briefingen:
-                {st.session_state['briefing']}
-
-                Användarens fråga / önskemål: {användar_fråga}
-
-                Svara pedagogiskt, lugnt och tydligt på svenska. För aktuella nyheter får du endast använda rådatan ovan.
-                Ange källnamn och kopiera artikelns länk exakt när du beskriver en nyhetsuppgift. Om frågan inte kan
-                besvaras från rådatan ska du säga att uppgiften inte kan verifieras i dagens källunderlag. Använd inte
-                egen kunskap för aktuella nyhetspåståenden och hitta aldrig på en källa eller länk.
-                """
-                svar = model.generate_content(prompt_fråga)
-                st.info(svar.text)
+                if vald_sektion == sektionsalternativ[0]:
+                    avsnitt = "\n".join(
+                        f"{rubrik}: {sammanfattning}"
+                        for rubrik, sammanfattning, _ in tillgangliga_sektioner
+                    )
+                    kallunderlag = ""
+                else:
+                    rubrik, sammanfattning, innehall = next(
+                        sektion for sektion in tillgangliga_sektioner if sektion[0] == vald_sektion
+                    )
+                    avsnitt = f"{rubrik}\n{sammanfattning}\n{innehall}"
+                    kallunderlag = valj_kallunderlag(
+                        innehall,
+                        st.session_state.get("artiklar", []),
+                    )
+                starttid = time.perf_counter()
+                try:
+                    svar = svara_pa_fraga(användar_fråga, avsnitt, kallunderlag)
+                    st.session_state["prestanda"]["fraga_sekunder"] = time.perf_counter() - starttid
+                    st.info(svar)
+                except Exception:
+                    st.error("Assistenten kunde inte svara just nu. Försök igen senare.")
 else:
-    st.write("Klicka på knappen ovan för att starta dagens läsning.")
+    st.write("Börja med att uppdatera källorna och skapa sedan morgonbriefingen.")
