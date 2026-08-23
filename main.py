@@ -263,9 +263,9 @@ st.markdown("""
     }
     .button-vine {
         width: 190px;
-        height: 52px;
-        margin: -24px auto 12px;
-        color: #6F8655;
+        height: 58px;
+        margin: -38px auto 12px;
+        color: #557C45;
     }
     .button-vine svg {
         display: block;
@@ -275,7 +275,8 @@ st.markdown("""
     @media (max-width: 480px) {
         .button-vine {
             width: 160px;
-            height: 44px;
+            height: 50px;
+            margin-top: -32px;
         }
     }
     input, textarea {
@@ -814,10 +815,10 @@ else:
     st.markdown(
         """
         <div class="button-vine" aria-hidden="true">
-            <svg viewBox="0 0 190 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M95 45C88 35 75 27 58 21C49 18 40 14 33 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                <path d="M95 45C102 35 115 27 132 21C141 18 150 14 157 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-                <path d="M67 25C61 17 54 16 49 18C53 24 59 27 67 25ZM51 18C48 11 42 9 37 11C40 16 45 19 51 18ZM123 25C129 17 136 16 141 18C137 24 131 27 123 25ZM139 18C142 11 148 9 153 11C150 16 145 19 139 18Z" fill="currentColor" fill-opacity="0.3" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+            <svg viewBox="0 0 190 58" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M95 54C88 42 75 31 58 23C48 18 41 11 37 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M95 54C102 42 115 31 132 23C142 18 149 11 153 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path d="M68 29C61 20 54 19 49 21C53 27 59 31 68 29ZM52 20C49 12 43 9 38 11C41 17 46 21 52 20ZM122 29C129 20 136 19 141 21C137 27 131 31 122 29ZM138 20C141 12 147 9 152 11C149 17 144 21 138 20Z" fill="currentColor" fill-opacity="0.38" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
             </svg>
         </div>
         """,
