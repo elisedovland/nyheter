@@ -78,6 +78,11 @@ st.markdown("""
         height: 38px;
         flex: 0 0 38px;
         color: #756B5C;
+        box-sizing: border-box;
+        padding: 5px;
+        border: 1px solid #C7B878;
+        border-radius: 50%;
+        background-color: #E9D99F;
     }
     .sun-symbol.right {
         transform: scaleX(-1);
