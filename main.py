@@ -4,7 +4,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -744,10 +744,8 @@ else:
     nyhetsstart = nu.replace(hour=12, minute=0, second=0, microsecond=0)
 nyhetsnyckel = nyhetsstart.strftime("%Y-%m-%d-%H")
 redaktionell_nyckel = nu.date().isoformat()
-nasta_redaktionella_dag = (nu + timedelta(days=1)).date()
 utgavetyp = "Morgonutgåvan" if nu.hour < 12 else "Eftermiddagsutgåvan"
 utgavedatum = f"{svenska_veckodagar[nu.weekday()]} {nu.day} {svenska_manader[nu.month - 1]} {nu.year} · {utgavetyp}"
-utgavetider = f"Böcker och morgontanke: nästa {nasta_redaktionella_dag:%d/%m kl. 00:00}"
 
 st.markdown(f"""
     <div class="header-box">
@@ -766,9 +764,8 @@ st.markdown(f"""
                 <path d="M17.2 5.1l2.4 7.4M28.4 35.5l2.4 7.4M5.1 30.8l7.4-2.4M35.5 19.6l7.4-2.4M5.1 17.2l7.4 2.4M35.5 28.4l7.4 2.4M17.2 42.9l2.4-7.4M28.4 12.5l2.4-7.4" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
             </svg>
         </div>
-        <div class="header-subtitle">Lugn AI-briefing &amp; litteratur i din egen takt</div>
+        <div class="header-subtitle">AI-briefing med nyheter, böcker och morgontanke</div>
         <div class="edition-date">{utgavedatum}</div>
-        <div class="edition-date">{utgavetider}</div>
     </div>
 """, unsafe_allow_html=True)
 
