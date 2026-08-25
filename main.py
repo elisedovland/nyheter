@@ -1,4 +1,5 @@
 import html
+import logging
 import os
 import re
 import threading
@@ -11,6 +12,8 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 import feedparser
 import google.generativeai as genai
+
+logger = logging.getLogger(__name__)
 
 # --- 1. SIDA OCH TILLGÄNGLIGHETSINSTÄLLNINGAR ---
 st.set_page_config(
@@ -320,7 +323,23 @@ else:
 @st.cache_resource
 def hamta_utgavelager():
     """Dela färdiga utgåvor mellan appens besökare så länge processen körs."""
-    return {"nyheter": {}, "redaktionellt": {}, "lock": threading.Lock()}
+    return {
+        "nyheter": {},
+        "redaktionellt": {},
+        "pagar": set(),
+        "lock": threading.Lock(),
+    }
+
+
+def generera_text(prompt, timeout=90):
+    """Anropa Gemini med en tydlig tidsgräns så att gränssnittet inte fastnar."""
+    if not model:
+        raise RuntimeError("Gemini API-nyckel saknas")
+    response = model.generate_content(
+        prompt,
+        request_options={"timeout": timeout},
+    )
+    return response.text
 
 
 KALLOR = {
@@ -491,7 +510,7 @@ def generera_fordjupning(rubrik, avsnitt, kallunderlag):
     KÄLLUNDERLAG:
     {kallunderlag or 'Redaktionellt avsnitt utan RSS-underlag.'}
     """
-    return model.generate_content(prompt).text
+    return generera_text(prompt, timeout=75)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -515,7 +534,7 @@ def svara_pa_fraga(fraga, avsnitt, kallunderlag):
     FRÅGA:
     {fraga}
     """
-    return model.generate_content(prompt).text
+    return generera_text(prompt, timeout=60)
 
 
 def genre_symbol(genre):
@@ -686,7 +705,7 @@ def generera_nyhetsbriefing(rådata, nyhetsnyckel):
     - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
     """
 
-    return model.generate_content(prompt).text
+    return generera_text(prompt, timeout=90)
 
 
 @st.cache_data(ttl=172800, show_spinner=False)
@@ -726,7 +745,7 @@ def generera_redaktionellt(dagsnyckel):
     Ge antingen ett rart, fundersamt filosofiskt citat/tanke eller ett oskyldigt, trevligt skämt för att avsluta rapporten på ett varmt sätt.
     """
 
-    return model.generate_content(prompt).text
+    return generera_text(prompt, timeout=75)
 
 # --- 2. HUVUDGRÄNSSNITT ---
 svenska_veckodagar = [
@@ -781,6 +800,7 @@ st.session_state["aktiv_nyhetsnyckel"] = nyhetsnyckel
 st.session_state["aktiv_redaktionell_nyckel"] = redaktionell_nyckel
 
 utgavelager = hamta_utgavelager()
+startnyckel = f"{nyhetsnyckel}|{redaktionell_nyckel}"
 nyhetsutgava = utgavelager["nyheter"].get(nyhetsnyckel)
 redaktionell_utgava = utgavelager["redaktionellt"].get(redaktionell_nyckel)
 
@@ -802,6 +822,7 @@ else:
         "Starta utgåvan",
         type="primary",
         key="starta_utgava",
+        disabled=startnyckel in utgavelager["pagar"],
     )
     st.markdown(
         """
@@ -817,58 +838,79 @@ else:
     )
     if starta_utgava:
         with st.spinner("Hämtar källor och skapar den gemensamma utgåvan..."):
+            har_startansvar = False
             try:
                 if not model:
                     raise RuntimeError("API-nyckel saknas")
                 with utgavelager["lock"]:
+                    if startnyckel not in utgavelager["pagar"]:
+                        utgavelager["pagar"].add(startnyckel)
+                        har_startansvar = True
                     nyhetsutgava = utgavelager["nyheter"].get(nyhetsnyckel)
-                    if not nyhetsutgava:
-                        starttid = time.perf_counter()
-                        nyhetsdata, kallstatus, artiklar = hamta_kallmaterial(nyhetsnyckel)
-                        rss_sekunder = time.perf_counter() - starttid
-                        if not nyhetsdata:
-                            hamta_kallmaterial.clear()
-                            raise RuntimeError("Inga nyhetskällor kunde hämtas")
-
-                        starttid = time.perf_counter()
-                        nyhetstext = generera_nyhetsbriefing(nyhetsdata, nyhetsnyckel)
-                        nyheter_ai_sekunder = time.perf_counter() - starttid
-                        nyhetsutgava = {
-                            "text": nyhetstext,
-                            "rådata": nyhetsdata,
-                            "artiklar": artiklar,
-                            "kallstatus": kallstatus,
-                            "prestanda": {
-                                "rss_sekunder": rss_sekunder,
-                                "nyheter_ai_sekunder": nyheter_ai_sekunder,
-                                "antal_artiklar": len(artiklar),
-                                "indatatecken": len(nyhetsdata),
-                            },
-                        }
-                        utgavelager["nyheter"].clear()
-                        utgavelager["nyheter"][nyhetsnyckel] = nyhetsutgava
-
                     redaktionell_utgava = utgavelager["redaktionellt"].get(
                         redaktionell_nyckel
                     )
-                    if not redaktionell_utgava:
-                        starttid = time.perf_counter()
-                        redaktionstext = generera_redaktionellt(redaktionell_nyckel)
-                        if not redaktionstext:
-                            raise RuntimeError("Redaktionellt innehåll kunde inte skapas")
-                        redaktionell_utgava = {
-                            "text": redaktionstext,
-                            "prestanda": {
-                                "redaktionellt_ai_sekunder": time.perf_counter() - starttid
-                            },
-                        }
+
+                if not har_startansvar:
+                    raise RuntimeError("Utgåvan skapas redan av en annan besökare")
+
+                fasstatus = st.empty()
+                if not nyhetsutgava:
+                    fasstatus.markdown("**Steg 1 av 3:** Hämtar och kontrollerar nyhetskällor...")
+                    starttid = time.perf_counter()
+                    nyhetsdata, kallstatus, artiklar = hamta_kallmaterial(nyhetsnyckel)
+                    rss_sekunder = time.perf_counter() - starttid
+                    if not nyhetsdata:
+                        hamta_kallmaterial.clear()
+                        raise RuntimeError("Inga nyhetskällor kunde hämtas")
+
+                    fasstatus.markdown("**Steg 2 av 3:** Skapar den korta nyhetsutgåvan...")
+                    starttid = time.perf_counter()
+                    nyhetstext = generera_nyhetsbriefing(nyhetsdata, nyhetsnyckel)
+                    nyheter_ai_sekunder = time.perf_counter() - starttid
+                    nyhetsutgava = {
+                        "text": nyhetstext,
+                        "rådata": nyhetsdata,
+                        "artiklar": artiklar,
+                        "kallstatus": kallstatus,
+                        "prestanda": {
+                            "rss_sekunder": rss_sekunder,
+                            "nyheter_ai_sekunder": nyheter_ai_sekunder,
+                            "antal_artiklar": len(artiklar),
+                            "indatatecken": len(nyhetsdata),
+                        },
+                    }
+                    with utgavelager["lock"]:
+                        utgavelager["nyheter"].clear()
+                        utgavelager["nyheter"][nyhetsnyckel] = nyhetsutgava
+
+                if not redaktionell_utgava:
+                    fasstatus.markdown("**Steg 3 av 3:** Skapar dagens böcker och morgontanke...")
+                    starttid = time.perf_counter()
+                    redaktionstext = generera_redaktionellt(redaktionell_nyckel)
+                    if not redaktionstext:
+                        raise RuntimeError("Redaktionellt innehåll kunde inte skapas")
+                    redaktionell_utgava = {
+                        "text": redaktionstext,
+                        "prestanda": {
+                            "redaktionellt_ai_sekunder": time.perf_counter() - starttid
+                        },
+                    }
+                    with utgavelager["lock"]:
                         utgavelager["redaktionellt"].clear()
                         utgavelager["redaktionellt"][redaktionell_nyckel] = (
                             redaktionell_utgava
                         )
+                fasstatus.empty()
+                st.session_state.pop("startfel", None)
                 st.rerun()
-            except Exception:
+            except Exception as error:
+                logger.exception("Kunde inte skapa utgåva %s: %s", startnyckel, error)
                 st.session_state["startfel"] = True
+            finally:
+                if har_startansvar:
+                    with utgavelager["lock"]:
+                        utgavelager["pagar"].discard(startnyckel)
 
 if st.session_state.get("startfel"):
     st.error("Utgåvan kunde inte skapas just nu. Försök igen om en stund.")
