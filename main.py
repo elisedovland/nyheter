@@ -1,4 +1,5 @@
 import html
+import json
 import logging
 import os
 import re
@@ -6,14 +7,27 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from pathlib import Path
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import streamlit as st
 import feedparser
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 
 logger = logging.getLogger(__name__)
+UTGAVECACHE = Path(__file__).with_name(".morgonposten-cache.json")
+
+
+class GeminiKvotSlut(RuntimeError):
+    """Geminis anropskvot är tillfälligt slut."""
+
+
+KVOTMEDDELANDE = (
+    "Dagens kostnadsfria AI-kvot är slut. En redan skapad utgåva visas fortfarande, "
+    "men en ny kan inte skapas förrän Google har återställt kvoten. Försök igen senare."
+)
 
 # --- 1. SIDA OCH TILLGÄNGLIGHETSINSTÄLLNINGAR ---
 st.set_page_config(
@@ -322,23 +336,49 @@ else:
 
 @st.cache_resource
 def hamta_utgavelager():
-    """Dela färdiga utgåvor mellan appens besökare så länge processen körs."""
+    """Läs färdiga utgåvor från disk och dela dem mellan appens besökare."""
+    sparat = {"nyheter": {}, "redaktionellt": {}}
+    try:
+        if UTGAVECACHE.exists():
+            inlast = json.loads(UTGAVECACHE.read_text(encoding="utf-8"))
+            if isinstance(inlast, dict):
+                sparat["nyheter"] = inlast.get("nyheter", {})
+                sparat["redaktionellt"] = inlast.get("redaktionellt", {})
+    except (OSError, json.JSONDecodeError, TypeError):
+        logger.exception("Kunde inte läsa den sparade utgåvan")
     return {
-        "nyheter": {},
-        "redaktionellt": {},
+        "nyheter": sparat["nyheter"],
+        "redaktionellt": sparat["redaktionellt"],
         "pagar": set(),
         "lock": threading.Lock(),
     }
+
+
+def spara_utgavelager(utgavelager):
+    """Spara färdigt innehåll atomiskt så att det överlever en omstart."""
+    tillfallig_fil = UTGAVECACHE.with_suffix(".tmp")
+    data = {
+        "nyheter": utgavelager["nyheter"],
+        "redaktionellt": utgavelager["redaktionellt"],
+    }
+    tillfallig_fil.write_text(
+        json.dumps(data, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    tillfallig_fil.replace(UTGAVECACHE)
 
 
 def generera_text(prompt, timeout=90):
     """Anropa Gemini med en tydlig tidsgräns så att gränssnittet inte fastnar."""
     if not model:
         raise RuntimeError("Gemini API-nyckel saknas")
-    response = model.generate_content(
-        prompt,
-        request_options={"timeout": timeout},
-    )
+    try:
+        response = model.generate_content(
+            prompt,
+            request_options={"timeout": timeout},
+        )
+    except ResourceExhausted as error:
+        raise GeminiKvotSlut(KVOTMEDDELANDE) from error
     return response.text
 
 
@@ -631,6 +671,8 @@ def visa_briefing(briefing, artiklar):
                         st.session_state["prestanda"]["fordjupning_sekunder"] = (
                             time.perf_counter() - starttid
                         )
+                    except GeminiKvotSlut:
+                        st.error(KVOTMEDDELANDE)
                     except Exception:
                         st.error("Fördjupningen kunde inte skapas just nu. Försök igen senare.")
             if nummer in st.session_state["fordjupningar"]:
@@ -883,6 +925,7 @@ else:
                     with utgavelager["lock"]:
                         utgavelager["nyheter"].clear()
                         utgavelager["nyheter"][nyhetsnyckel] = nyhetsutgava
+                        spara_utgavelager(utgavelager)
 
                 if not redaktionell_utgava:
                     fasstatus.markdown("**Steg 3 av 3:** Skapar dagens böcker och morgontanke...")
@@ -901,18 +944,24 @@ else:
                         utgavelager["redaktionellt"][redaktionell_nyckel] = (
                             redaktionell_utgava
                         )
+                        spara_utgavelager(utgavelager)
                 fasstatus.empty()
                 st.session_state.pop("startfel", None)
                 st.rerun()
+            except GeminiKvotSlut as error:
+                logger.warning("Gemini-kvoten är slut för utgåva %s: %s", startnyckel, error)
+                st.session_state["startfel"] = "kvot"
             except Exception as error:
                 logger.exception("Kunde inte skapa utgåva %s: %s", startnyckel, error)
-                st.session_state["startfel"] = True
+                st.session_state["startfel"] = "ovantat"
             finally:
                 if har_startansvar:
                     with utgavelager["lock"]:
                         utgavelager["pagar"].discard(startnyckel)
 
-if st.session_state.get("startfel"):
+if st.session_state.get("startfel") == "kvot":
+    st.error(KVOTMEDDELANDE)
+elif st.session_state.get("startfel"):
     st.error("Utgåvan kunde inte skapas just nu. Försök igen om en stund.")
 
 if 'kallstatus' in st.session_state:
@@ -996,5 +1045,7 @@ if 'briefing' in st.session_state:
                     svar = svara_pa_fraga(användar_fråga, avsnitt, kallunderlag)
                     st.session_state["prestanda"]["fraga_sekunder"] = time.perf_counter() - starttid
                     st.info(svar)
+                except GeminiKvotSlut:
+                    st.error(KVOTMEDDELANDE)
                 except Exception:
                     st.error("Assistenten kunde inte svara just nu. Försök igen senare.")
