@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
@@ -26,7 +26,8 @@ class GeminiKvotSlut(RuntimeError):
 
 KVOTMEDDELANDE = (
     "Dagens kostnadsfria AI-kvot är slut. En redan skapad utgåva visas fortfarande, "
-    "men en ny kan inte skapas förrän Google har återställt kvoten. Försök igen senare."
+    "men en ny kan inte skapas förrän Google har återställt kvoten. "
+    "Appen försöker inte igen automatiskt före nästa återställning."
 )
 
 # --- 1. SIDA OCH TILLGÄNGLIGHETSINSTÄLLNINGAR ---
@@ -337,18 +338,20 @@ else:
 @st.cache_resource
 def hamta_utgavelager():
     """Läs färdiga utgåvor från disk och dela dem mellan appens besökare."""
-    sparat = {"nyheter": {}, "redaktionellt": {}}
+    sparat = {"nyheter": {}, "redaktionellt": {}, "kvotstopp_till": None}
     try:
         if UTGAVECACHE.exists():
             inlast = json.loads(UTGAVECACHE.read_text(encoding="utf-8"))
             if isinstance(inlast, dict):
                 sparat["nyheter"] = inlast.get("nyheter", {})
                 sparat["redaktionellt"] = inlast.get("redaktionellt", {})
+                sparat["kvotstopp_till"] = inlast.get("kvotstopp_till")
     except (OSError, json.JSONDecodeError, TypeError):
         logger.exception("Kunde inte läsa den sparade utgåvan")
     return {
         "nyheter": sparat["nyheter"],
         "redaktionellt": sparat["redaktionellt"],
+        "kvotstopp_till": sparat["kvotstopp_till"],
         "pagar": set(),
         "lock": threading.Lock(),
     }
@@ -360,6 +363,7 @@ def spara_utgavelager(utgavelager):
     data = {
         "nyheter": utgavelager["nyheter"],
         "redaktionellt": utgavelager["redaktionellt"],
+        "kvotstopp_till": utgavelager.get("kvotstopp_till"),
     }
     tillfallig_fil.write_text(
         json.dumps(data, ensure_ascii=False),
@@ -368,16 +372,52 @@ def spara_utgavelager(utgavelager):
     tillfallig_fil.replace(UTGAVECACHE)
 
 
+def nasta_kvotaterstallning():
+    """Returnera nästa midnatt i amerikansk Pacific-tid som Stockholmstid."""
+    pacific = ZoneInfo("America/Los_Angeles")
+    nu_pacific = datetime.now(pacific)
+    nasta_dag = nu_pacific.date() + timedelta(days=1)
+    return datetime.combine(nasta_dag, datetime.min.time(), tzinfo=pacific).astimezone(
+        ZoneInfo("Europe/Stockholm")
+    )
+
+
+def kvotstopp_aktivt(utgavelager, nu):
+    """Kontrollera och rensa ett passerat stopp för daglig Gemini-kvot."""
+    sparat_stopp = utgavelager.get("kvotstopp_till")
+    if not sparat_stopp:
+        return False
+    try:
+        stopp_till = datetime.fromisoformat(sparat_stopp)
+    except (TypeError, ValueError):
+        utgavelager["kvotstopp_till"] = None
+        return False
+    if nu >= stopp_till:
+        utgavelager["kvotstopp_till"] = None
+        spara_utgavelager(utgavelager)
+        return False
+    return True
+
+
 def generera_text(prompt, timeout=90):
     """Anropa Gemini med en tydlig tidsgräns så att gränssnittet inte fastnar."""
     if not model:
         raise RuntimeError("Gemini API-nyckel saknas")
+    utgavelager = hamta_utgavelager()
+    if kvotstopp_aktivt(
+        utgavelager,
+        datetime.now(ZoneInfo("Europe/Stockholm")),
+    ):
+        raise GeminiKvotSlut(KVOTMEDDELANDE)
     try:
         response = model.generate_content(
             prompt,
-            request_options={"timeout": timeout},
+            request_options={"timeout": timeout, "retry": None},
         )
     except ResourceExhausted as error:
+        with utgavelager["lock"]:
+            utgavelager["kvotstopp_till"] = nasta_kvotaterstallning().isoformat()
+            spara_utgavelager(utgavelager)
         raise GeminiKvotSlut(KVOTMEDDELANDE) from error
     return response.text
 
@@ -680,12 +720,51 @@ def visa_briefing(briefing, artiklar):
                     st.markdown(st.session_state["fordjupningar"][nummer])
 
 
+def redaktionella_instruktioner(dagsnyckel):
+    return f"""
+    Skapa även följande redaktionella avsnitt för {dagsnyckel}. De ska användas hela dagen.
+    Skriv tydligt, varmt och kortfattat. Inkludera inga bilder, bildadresser,
+    omslagsbilder eller länkar till bilder.
+
+    ### 📚 8. DAGENS KLASSIKER
+    **Kort sagt:** Presentera boken i en kort mening.
+    En bok utgiven för minst ett år sedan. Skriv metadata på egna rader i exakt detta format:
+    Titel: bokens titel
+    Författare: författarens namn
+    Utgivningsår: årtal
+    Genre: tydlig genre
+    Skriv därefter en blurb på 2-3 meningar.
+
+    ### 📖 9. DAGENS NYA BOKREKOMMENDATION
+    **Kort sagt:** Presentera boken i en kort mening.
+    En nyligen utgiven bok. Skriv metadata på egna rader i exakt samma format som ovan.
+    Skriv därefter en blurb på 2-3 meningar.
+
+    ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
+    **Kort sagt:** Ge en kort inledning utan att avslöja hela poängen.
+    Ge en rar filosofisk tanke eller ett oskyldigt skämt som varmt avslut.
+    """
+
+
+def dela_genererad_utgava(text):
+    """Dela ett gemensamt Gemini-svar i nyheter och redaktionellt innehåll."""
+    grans = re.search(r"(?m)^###\s+.*\b8\.\s+", text)
+    if not grans:
+        raise RuntimeError("Gemini utelämnade de redaktionella avsnitten")
+    return text[:grans.start()].strip(), text[grans.start():].strip()
+
+
 @st.cache_data(ttl=172800, show_spinner=False)
-def generera_nyhetsbriefing(rådata, nyhetsnyckel):
-    """Skapa nyhetsdelarna en gång per 12-timmarsutgåva."""
+def generera_nyhetsbriefing(rådata, nyhetsnyckel, redaktionell_nyckel=None):
+    """Skapa hela 12-timmarsutgåvan med högst ett Gemini-anrop."""
     if not model:
         return "⚠️ API-nyckel saknas. Lägg till din GEMINI_API_KEY under 'Secrets' i Streamlit Cloud."
 
+    redaktionellt = (
+        redaktionella_instruktioner(redaktionell_nyckel)
+        if redaktionell_nyckel
+        else "Skapa endast nyhetssektionerna 1-7."
+    )
     prompt = f"""
     Du är en källkritisk nyhetsanalytiker för en person som läser sista året på gymnasiet (samhällsvetenskap).
     Läsaren har nystagmus och kronisk migrän. Skriv mycket tydligt, använd korta avsnitt och ha ett lugnt, pedagogiskt tilltal.
@@ -704,7 +783,7 @@ def generera_nyhetsbriefing(rådata, nyhetsnyckel):
     - Utelämna helt en nyhetssektion (1-7) om det inte finns en relevant artikel i underlaget.
       Appen visar då automatiskt att säkert underlag saknas. Skriv inte utfyllnad om frånvaron.
 
-    Skapa nyhetsdelen på SVENSKA. Hela svaret ska vara ungefär 550-800 ord.
+    Skapa nyhetsdelen på SVENSKA. Nyhetsdelen ska vara ungefär 550-800 ord.
     Använd följande rubriker för de sektioner som har underlag:
 
     ### 🇸🇪 1. SVERIGE & VALET
@@ -745,49 +824,12 @@ def generera_nyhetsbriefing(rådata, nyhetsnyckel):
     REGLER:
     - Skriv källraden som: Källa: [KÄLLNAMN](EXAKT LÄNK) · Artikel-ID: A1
     - Förklara endast mer avancerade juridiska/statsvetenskapliga begrepp (t.ex. "ratificera", "suveränitetsprincip").
+
+    {redaktionellt}
     """
 
-    return generera_text(prompt, timeout=90)
+    return generera_text(prompt, timeout=120)
 
-
-@st.cache_data(ttl=172800, show_spinner=False)
-def generera_redaktionellt(dagsnyckel):
-    """Skapa boktips och morgontanke en gång per Stockholmsdatum."""
-    if not model:
-        return ""
-
-    prompt = f"""
-    Du är litteraturkännare och redaktör för en lugn svensk morgontidning. Skapa dagens
-    redaktionella innehåll för {dagsnyckel} i tidszonen Europe/Stockholm. Samma innehåll ska
-    användas hela dagen. Skriv tydligt, varmt och kortfattat. Inkludera inga bilder,
-    bildadresser, omslagsbilder eller länkar till bilder.
-
-    ### 📚 8. DAGENS KLASSIKER
-    **Kort sagt:** Presentera boken i en kort mening.
-    En bok utgiven för minst ett år sedan (eller tidigare). Inga parenteser i rubriken.
-    Skriv metadata på fyra egna rader i exakt detta format:
-    Titel: bokens titel
-    Författare: författarens namn
-    Utgivningsår: årtal
-    Genre: tydlig genre
-    Skriv därefter en blurb på 2-3 meningar.
-
-    ### 📖 9. DAGENS NYA BOKREKOMMENDATION
-    **Kort sagt:** Presentera boken i en kort mening.
-    En nyligen utgiven bok. Inga parenteser i rubriken.
-    Skriv metadata på fyra egna rader i exakt detta format:
-    Titel: bokens titel
-    Författare: författarens namn
-    Utgivningsår: årtal
-    Genre: tydlig genre
-    Skriv därefter en blurb på 2-3 meningar.
-
-    ### ☀️ 10. MORGONENS TANKE ELLER SKÄMT
-    **Kort sagt:** Ge en kort inledning utan att avslöja hela poängen.
-    Ge antingen ett rart, fundersamt filosofiskt citat/tanke eller ett oskyldigt, trevligt skämt för att avsluta rapporten på ett varmt sätt.
-    """
-
-    return generera_text(prompt, timeout=75)
 
 # --- 2. HUVUDGRÄNSSNITT ---
 svenska_veckodagar = [
@@ -845,6 +887,7 @@ utgavelager = hamta_utgavelager()
 startnyckel = f"{nyhetsnyckel}|{redaktionell_nyckel}"
 nyhetsutgava = utgavelager["nyheter"].get(nyhetsnyckel)
 redaktionell_utgava = utgavelager["redaktionellt"].get(redaktionell_nyckel)
+kvoten_ar_stoppad = kvotstopp_aktivt(utgavelager, nu)
 
 if nyhetsutgava and redaktionell_utgava:
     briefing = f"{nyhetsutgava['text']}\n\n{redaktionell_utgava['text']}".strip()
@@ -864,7 +907,7 @@ else:
         "Starta utgåvan",
         type="primary",
         key="starta_utgava",
-        disabled=startnyckel in utgavelager["pagar"],
+        disabled=startnyckel in utgavelager["pagar"] or kvoten_ar_stoppad,
     )
     st.markdown(
         """
@@ -897,19 +940,40 @@ else:
                     raise RuntimeError("Utgåvan skapas redan av en annan besökare")
 
                 fasstatus = st.empty()
-                if not nyhetsutgava:
-                    fasstatus.markdown("**Steg 1 av 3:** Hämtar och kontrollerar nyhetskällor...")
+                if not nyhetsutgava or not redaktionell_utgava:
+                    fasstatus.markdown("**Steg 1 av 2:** Hämtar och kontrollerar nyhetskällor...")
                     starttid = time.perf_counter()
-                    nyhetsdata, kallstatus, artiklar = hamta_kallmaterial(nyhetsnyckel)
-                    rss_sekunder = time.perf_counter() - starttid
+                    if nyhetsutgava:
+                        nyhetsdata = nyhetsutgava["rådata"]
+                        kallstatus = nyhetsutgava["kallstatus"]
+                        artiklar = nyhetsutgava["artiklar"]
+                        rss_sekunder = 0.0
+                    else:
+                        nyhetsdata, kallstatus, artiklar = hamta_kallmaterial(nyhetsnyckel)
+                        rss_sekunder = time.perf_counter() - starttid
                     if not nyhetsdata:
                         hamta_kallmaterial.clear()
                         raise RuntimeError("Inga nyhetskällor kunde hämtas")
 
-                    fasstatus.markdown("**Steg 2 av 3:** Skapar den korta nyhetsutgåvan...")
+                    fasstatus.markdown("**Steg 2 av 2:** Skapar den gemensamma utgåvan...")
                     starttid = time.perf_counter()
-                    nyhetstext = generera_nyhetsbriefing(nyhetsdata, nyhetsnyckel)
+                    skapa_redaktionellt = not redaktionell_utgava
+                    genererad_text = generera_nyhetsbriefing(
+                        nyhetsdata,
+                        nyhetsnyckel,
+                        redaktionell_nyckel if skapa_redaktionellt else None,
+                    )
                     nyheter_ai_sekunder = time.perf_counter() - starttid
+                    if skapa_redaktionellt:
+                        nyhetstext, redaktionstext = dela_genererad_utgava(genererad_text)
+                        redaktionell_utgava = {
+                            "text": redaktionstext,
+                            "prestanda": {
+                                "redaktionellt_ai_sekunder": nyheter_ai_sekunder
+                            },
+                        }
+                    else:
+                        nyhetstext = genererad_text
                     nyhetsutgava = {
                         "text": nyhetstext,
                         "rådata": nyhetsdata,
@@ -925,25 +989,11 @@ else:
                     with utgavelager["lock"]:
                         utgavelager["nyheter"].clear()
                         utgavelager["nyheter"][nyhetsnyckel] = nyhetsutgava
-                        spara_utgavelager(utgavelager)
-
-                if not redaktionell_utgava:
-                    fasstatus.markdown("**Steg 3 av 3:** Skapar dagens böcker och morgontanke...")
-                    starttid = time.perf_counter()
-                    redaktionstext = generera_redaktionellt(redaktionell_nyckel)
-                    if not redaktionstext:
-                        raise RuntimeError("Redaktionellt innehåll kunde inte skapas")
-                    redaktionell_utgava = {
-                        "text": redaktionstext,
-                        "prestanda": {
-                            "redaktionellt_ai_sekunder": time.perf_counter() - starttid
-                        },
-                    }
-                    with utgavelager["lock"]:
-                        utgavelager["redaktionellt"].clear()
-                        utgavelager["redaktionellt"][redaktionell_nyckel] = (
-                            redaktionell_utgava
-                        )
+                        if skapa_redaktionellt:
+                            utgavelager["redaktionellt"].clear()
+                            utgavelager["redaktionellt"][redaktionell_nyckel] = (
+                                redaktionell_utgava
+                            )
                         spara_utgavelager(utgavelager)
                 fasstatus.empty()
                 st.session_state.pop("startfel", None)
@@ -959,7 +1009,7 @@ else:
                     with utgavelager["lock"]:
                         utgavelager["pagar"].discard(startnyckel)
 
-if st.session_state.get("startfel") == "kvot":
+if kvoten_ar_stoppad or st.session_state.get("startfel") == "kvot":
     st.error(KVOTMEDDELANDE)
 elif st.session_state.get("startfel"):
     st.error("Utgåvan kunde inte skapas just nu. Försök igen om en stund.")
